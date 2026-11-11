@@ -8,8 +8,15 @@
 # entier) pour ne pas masquer public/traces.json, qui est généré dans l'image.
 # `node --watch` redémarre le serveur à chaque sauvegarde depuis l'éditeur.
 #
-# Port de l'hôte : 3000 par défaut, surchargeable par HOST_PORT dans .env
-# (utile si un autre service occupe déjà ce port).
+# Port : une seule variable, PORT (dans .env ou en ligne de commande), change
+# à la fois le port d'écoute dans le conteneur et le port publié sur l'hôte :
+#
+#   PORT=8080 docker compose up        ou  PORT=8080 dans .env
+#
+# HOST_PORT ne sert qu'à dissocier les deux (publier sur un autre port de
+# l'hôte que celui écouté dans le conteneur) :
+#
+#   HOST_PORT=8080 docker compose up   # 8080 sur l'hôte → PORT dans le conteneur
 
 name: linerelay
 
@@ -27,10 +34,10 @@ services:
     command: ["node", "--watch", "server.js"]
     init: true
     ports:
-      - "${HOST_PORT:-3000}:3000"
+      - "${HOST_PORT:-${PORT:-3000}}:${PORT:-3000}"
     environment:
       NODE_ENV: development
-      PORT: 3000
+      PORT: ${PORT:-3000}
       TZ: ${TZ:-Europe/Paris}
     env_file:
       - path: .env

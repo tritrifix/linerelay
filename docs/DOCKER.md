@@ -86,8 +86,13 @@ de Windows par défaut. Chaque cible a un équivalent portable dans
 La carte répond sur <http://localhost:3000>. Si ce port est déjà pris :
 
 ```bash
-HOST_PORT=8080 make dev
+PORT=8080 make dev                     # ou : PORT=8080 docker compose up --build
 ```
+
+`PORT` vaut pour le conteneur **et** pour le port publié sur l'hôte, en dev
+comme en prod. Pour le changer durablement, mettez `PORT=8080` dans `.env` :
+Compose, `make` et le serveur Node le lisent tous. `HOST_PORT` ne sert qu'à
+dissocier les deux côtés (voir *Variables d'environnement*).
 
 Le code est monté depuis l'hôte **fichier par fichier** (`server.js`,
 `public/app.js`, `public/index.html`, `public/style.css`, `tools/`,
@@ -189,7 +194,7 @@ TAG=v1.0.0 make push
 
    Vérifie l'ancienne entrée avant de la supprimer : elle peut encore pointer
    vers `/home/user/divia-ligne5-map/start.sh`. Tu peux aussi garder les deux
-   en parallèle le temps de la bascule, avec `HOST_PORT=3001` pour le conteneur.
+   en parallèle le temps de la bascule, avec `PORT=3001` pour le conteneur.
 
 ### À chaque déploiement
 
@@ -230,23 +235,23 @@ Pour revenir en arrière, la même commande avec le tag précédent.
 ```bash
 docker compose -f compose.prod.yaml ps        # état et santé
 docker compose -f compose.prod.yaml logs -f   # logs (10 Mo × 3 fichiers max)
-curl -s localhost:3000/api/health
+curl -s localhost:3000/api/health             # adaptez si PORT n'est pas 3000
 ```
 
 ## Variables d'environnement
 
 Toutes sont optionnelles et ont une valeur par défaut. Celles lues par Compose
-(`HOST_PORT`, `TZ`, `LINERELAY_IMAGE`, `SKIP_TRACES`, `GTFS_STATIC_URL`)
+(`PORT`, `HOST_PORT`, `TZ`, `LINERELAY_IMAGE`, `SKIP_TRACES`, `GTFS_STATIC_URL`)
 viennent du fichier `.env` à la racine ; celles lues par l'application lui sont
 transmises par `env_file`.
 
 | Variable | Portée | Rôle |
 |---|---|---|
-| `HOST_PORT` | Compose | port exposé sur l'hôte (défaut `3000`) |
+| `PORT` | Compose et application | port d'écoute, et port publié sur l'hôte par défaut (défaut `3000`) |
+| `HOST_PORT` | Compose | port publié sur l'hôte **uniquement** s'il doit différer de `PORT` |
 | `TZ` | Compose | fuseau du conteneur (défaut `Europe/Paris`) |
 | `LINERELAY_IMAGE` | Compose (prod) | image à déployer (défaut `:latest`) |
 | `SKIP_TRACES` | build | `1` pour construire sans réseau |
-| `PORT` | application | port interne, laissé à `3000` dans le conteneur |
 | `VEHICLE_FEED_URL`, `TRIPUPDATE_FEED_URL` | application | flux GTFS-RT |
 | `VELODI_FEED_URL`, `VELODI_ORG_ID` | application | couche vélos ; URL vide = désactivée |
 | `GTFS_STATIC_URL` | build et `build:traces` | jeu de données GTFS statique |
