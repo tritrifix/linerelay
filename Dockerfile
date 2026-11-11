@@ -21,7 +21,15 @@ ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 FROM ${NODE_IMAGE} AS npmdeps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY docker/prune-node-modules.mjs ./docker/
+# `gtfs-realtime-bindings` déclare protobufjs-cli (et donc jsdoc, @babel,
+# lodash, underscore…) en dépendance normale alors que seul le décodeur
+# protobufjs sert à l'exécution : l'élagage retire cette chaîne d'outillage,
+# soit environ 24 Mo sur 35.
+RUN npm ci --omit=dev \
+ && npm cache clean --force \
+ && node docker/prune-node-modules.mjs . \
+ && rm -rf docker
 
 # --------------------------------------------------------------------------- #
 # 2. Assets générés : tracés des lignes + module Python du repli              #

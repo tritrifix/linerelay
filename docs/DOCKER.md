@@ -30,7 +30,7 @@ cache, ni dépendances de développement :
 
 | Étage | Base | Rôle |
 |---|---|---|
-| `npmdeps` | `node:20-bookworm-slim` | `npm ci --omit=dev` |
+| `npmdeps` | `node:20-bookworm-slim` | `npm ci --omit=dev`, puis élagage de `node_modules` (voir ci-dessous) |
 | `assets` | `python:3.12-slim-bookworm` | télécharge le GTFS statique et génère `public/traces.json` ; récupère le paquet `divia_api` du dépôt public `tritrifix/scripts-divia` pour le repli horaires |
 | `runtime` | `node:20-bookworm-slim` | Node + un virtualenv Python isolé, l'application, utilisateur non privilégié `node` (uid 1000) |
 
@@ -47,6 +47,15 @@ Détails utiles :
   amont, pas le reste de ses scripts.
 - **Sonde de santé intégrée** : `HEALTHCHECK` interroge `/api/health` avec
   Node, sans `curl` ni outil supplémentaire.
+- **`node_modules` est élagué** par `docker/prune-node-modules.mjs` :
+  `gtfs-realtime-bindings` déclare `protobufjs-cli` en dépendance normale, qui
+  tire `jsdoc` et toute sa chaîne (`@babel`, `lodash`, `underscore`,
+  `markdown-it`…) alors que seul le décodeur `protobufjs` sert à l'exécution.
+  Le script calcule la fermeture transitive des dépendances de production à
+  partir de `package.json` et supprime le reste — soit 24 Mo sur 35. Le calcul
+  étant refait à chaque build, il ne se périme pas quand les dépendances
+  changent. En local : `DRY_RUN=1 node docker/prune-node-modules.mjs .` montre
+  ce qui serait supprimé sans rien toucher.
 - En production le conteneur tourne en **lecture seule**, sans capacité Linux
   (`cap_drop: ALL`), `no-new-privileges`, avec `/tmp` en mémoire.
 
