@@ -1,0 +1,20 @@
+{
+  "name": "linerelay",
+  "version": "1.0.0",
+  "description": "LineRelay — carte interactive temps réel des transports en commun de Dijon Métropole.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build:traces": "python3 tools/build_traces.py"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["divia", "dijon", "gtfs-rt", "navitia", "leaflet", "bus", "temps-reel"],
+  "license": "ISC",
+  "dependencies": {
+    "divia-api": "^3.0.3",
+    "express": "^5.2.1",
+    "gtfs-realtime-bindings": "^1.1.1"
+  }
+}

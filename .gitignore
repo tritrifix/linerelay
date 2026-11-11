@@ -1,0 +1,63 @@
+# --- Secrets et configuration locale -----------------------------------
+.env
+.env.*
+!.env.example
+config.local.*
+secrets/
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
+*.kdbx
+
+# --- Dépendances --------------------------------------------------------
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.Python
+
+# --- Dépôt externe cloné par install.sh --------------------------------
+divia-scripts/
+
+# --- Données téléchargées, générées ou mises en cache ------------------
+public/traces.json
+*.zip
+*.gz
+*.tar
+gtfs/
+data/
+.cache/
+cache/
+
+# --- Bases locales ------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Exécution : logs, PID ---------------------------------------------
+*.log
+logs/
+.server.pid
+*.pid
+probe*.js
+
+# --- Builds -------------------------------------------------------------
+dist/
+build/
+out/
+coverage/
+
+# --- IDE / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

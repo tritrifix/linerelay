@@ -1,0 +1,345 @@
+:root {
+  --line: #ea619f; /* couleur officielle L5 ; surchargée dynamiquement par l'API */
+  --ink: #1c2230;
+  --panel: rgba(255, 255, 255, 0.96);
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+}
+#map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Barre titre */
+#topbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  padding: 8px 14px 8px 8px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font-weight: 600;
+}
+.badge {
+  background: var(--line);
+  color: #fff;
+  font-weight: 800;
+  border-radius: 8px;
+  padding: 4px 10px;
+  letter-spacing: 0.5px;
+  min-width: 34px;
+  text-align: center;
+}
+.service {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a6270;
+  white-space: nowrap;
+}
+.service:empty {
+  display: none;
+}
+/* Bouton bascule d'affichage des retards */
+.toggle {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #5a6270;
+  background: #fff;
+  border: 1px solid #d6dae2;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.toggle:hover {
+  background: #f3f4f7;
+}
+.toggle.active {
+  background: #f5a623;
+  border-color: #f5a623;
+  color: #fff;
+}
+#line-select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  border: 1px solid #d6dae2;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  max-width: 60vw;
+  cursor: pointer;
+  outline: none;
+}
+#line-select:focus {
+  border-color: var(--line);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Indicateur de statut (haut droite) */
+.status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  padding: 8px 14px;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  max-width: 70vw;
+}
+.status .dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #9aa0a6;
+  flex: 0 0 auto;
+}
+.status.ok .dot {
+  background: #1db954;
+  box-shadow: 0 0 0 4px rgba(29, 185, 84, 0.18);
+}
+.status.stale .dot {
+  background: #f5a623;
+  box-shadow: 0 0 0 4px rgba(245, 166, 35, 0.18);
+}
+.status.error .dot {
+  background: #e0245e;
+  box-shadow: 0 0 0 4px rgba(224, 36, 94, 0.18);
+}
+.status-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+#refresh-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #d6dae2;
+  background: #fff;
+  color: var(--line);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+#refresh-btn:hover {
+  background: #f3f4f7;
+}
+#refresh-btn:active {
+  transform: scale(0.92);
+}
+#refresh-btn.spin {
+  animation: spin 0.6s linear;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.status-text small {
+  color: #5a6270;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Légende (bas gauche) */
+.legend {
+  position: absolute;
+  left: 12px;
+  bottom: 22px;
+  z-index: 1000;
+  background: var(--panel);
+  padding: 10px 12px;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  display: grid;
+  gap: 6px;
+}
+.legend span {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.lg-line {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.lg-stop {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--line);
+}
+.lg-bus {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--line);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.lg-velodi {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1db954;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #1db954;
+}
+
+/* Marqueur arrêt */
+.stop-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--line);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+/* Badge de retard sur un marqueur d'arrêt */
+.delay-badge {
+  position: absolute;
+  left: 12px;
+  top: -7px;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 8px;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.delay-badge.late {
+  background: #f5a623;
+}
+.delay-badge.skip {
+  background: #e0245e;
+}
+
+/* Marqueur bus (véhicule temps réel) */
+.bus-marker {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--line);
+  border: 2px solid #fff;
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 13px;
+}
+
+/* Marqueur station DiviaVélodi (pastille = nb de vélos dispo) */
+.velodi-marker {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #1db954;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.velodi-marker.empty {
+  background: #b9bec7;
+}
+.velodi-marker.off {
+  background: #9aa0a6;
+  opacity: 0.75;
+}
+.velodi-num {
+  font-weight: 600;
+  color: #8a909c;
+  font-size: 12px;
+}
+.velodi-stat {
+  font-size: 13px;
+  padding: 3px 0;
+  border-top: 1px solid #eee;
+}
+
+/* Popup horaires */
+.popup-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+.passage {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 4px 0;
+  border-top: 1px solid #eee;
+  font-size: 13px;
+}
+.passage .dir {
+  color: #333;
+}
+.passage .when {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.passage .rt {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1db954;
+  margin-left: 6px;
+}
+.passage.sched .rt {
+  background: #b9bec7;
+}
+.popup-empty {
+  color: #777;
+  font-size: 13px;
+}
+.popup-foot {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8a909c;
+}
+
+@media (max-width: 600px) {
+  #line-name {
+    display: none;
+  }
+  .legend {
+    font-size: 12px;
+  }
+}
