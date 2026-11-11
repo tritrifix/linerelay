@@ -33,7 +33,7 @@ Aucune clé d'API n'est nécessaire.
 git clone git@github.com:tritrifix/linerelay.git
 cd linerelay
 make dev          # ou : docker compose up --build
-# puis ouvrir http://localhost:3000
+# puis ouvrir http://localhost:3000   (PORT=8080 make dev pour un autre port)
 ```
 
 Le code est monté depuis l'hôte et le serveur redémarre à chaque sauvegarde.
@@ -73,19 +73,50 @@ fournisseur de flux sans toucher au code. Toutes ont une valeur par défaut.
 
 | Variable | Rôle |
 |---|---|
-| `PORT` | port d'écoute du serveur HTTP (défaut `3000`) |
+| `PORT` | port d'écoute du serveur HTTP (défaut `3000`), voir [Changer le port](#changer-le-port) |
 | `VEHICLE_FEED_URL` | flux GTFS-RT « vehicle position » |
 | `TRIPUPDATE_FEED_URL` | flux GTFS-RT « trip update » (retards, arrêts supprimés) |
 | `VELODI_FEED_URL` | API de disponibilité des vélos en libre-service ; vide = couche désactivée |
 | `VELODI_ORG_ID` | identifiant d'organisation côté fournisseur vélos (`1` = Dijon) |
 | `GTFS_STATIC_URL` | jeu de données GTFS statique utilisé par `npm run build:traces` |
 
-Le serveur ne lit pas lui-même le fichier `.env`. Exportez les variables avant
-de lancer, ou laissez votre gestionnaire de process (PM2, systemd) les injecter :
+Le serveur lit `.env` au démarrage. Une variable déjà présente dans
+l'environnement l'emporte sur le fichier, ce qui permet une surcharge
+ponctuelle sans l'éditer :
 
 ```bash
-set -a; . ./.env; set +a; npm start
+PORT=8080 npm start
 ```
+
+### Changer le port
+
+`PORT` est le seul réglage à toucher, en développement comme en production :
+une même valeur dans `.env` sert au serveur Node, au conteneur Docker et au
+port publié sur la machine hôte.
+
+```bash
+# durablement, pour tous les modes de lancement
+sed -i 's/^PORT=.*/PORT=8080/' .env
+
+# ponctuellement, le temps d'un lancement
+PORT=8080 npm start                                  # dev local
+PORT=8080 ./start.sh                                 # dev local, en arrière-plan
+PORT=8080 make dev                                   # dev Docker
+PORT=8080 docker compose up --build                  # idem, sans make
+PORT=8080 make deploy                                # production
+PORT=8080 docker compose -f compose.prod.yaml up -d  # idem, sans make
+```
+
+En Docker, `PORT` change à la fois le port écouté dans le conteneur et le port
+publié sur l'hôte. `HOST_PORT` ne sert qu'à dissocier les deux — par exemple
+publier sur `80` derrière un reverse proxy alors que le conteneur écoute sur
+`PORT` :
+
+```bash
+HOST_PORT=80 docker compose -f compose.prod.yaml up -d
+```
+
+`PORT=0` laisse le système attribuer un port libre, affiché au démarrage.
 
 ## Lancement et exploitation
 
@@ -94,7 +125,7 @@ npm start             # premier plan
 ./start.sh            # démarre / redémarre (PM2 si présent, sinon nohup + PID-file)
 ./start.sh status     # état
 ./start.sh stop       # arrêt
-PORT=8080 ./start.sh  # autre port
+PORT=8080 ./start.sh  # autre port (voir « Changer le port »)
 ```
 
 ## API HTTP

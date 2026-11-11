@@ -5,9 +5,12 @@
 # Utilise PM2 s'il est installé (gestion de process robuste), sinon lance
 # `node server.js` en arrière-plan avec un PID-file et un log.
 #
-#   ./start.sh          démarre (ou redémarre) sur le port $PORT (défaut 3000)
+#   ./start.sh          démarre (ou redémarre) sur le port configuré
 #   ./start.sh stop     arrête le serveur
 #   ./start.sh status   affiche l'état
+#
+# Port : PORT dans l'environnement (`PORT=8080 ./start.sh`) l'emporte, sinon
+# PORT du fichier .env, sinon 3000.
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -22,6 +25,12 @@ for d in "${HOME:-$PWD}"/.local/node-*/bin /usr/local/bin /usr/bin; do
 done
 export PATH
 
+# PORT : l'environnement d'abord, puis le .env du projet (que server.js lit
+# également), puis 3000. On ne lit que PORT ici — le reste de la configuration
+# est chargé par server.js lui-même.
+if [ -z "${PORT:-}" ] && [ -f .env ]; then
+  PORT="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}PORT[[:space:]]*=[[:space:]]*["'"'"']\{0,1\}\([0-9]\{1,5\}\).*/\2/p' .env | tail -n1)"
+fi
 PORT="${PORT:-3000}"
 APP_NAME="divia-ligne5"
 PID_FILE=".server.pid"
@@ -62,8 +71,10 @@ case "${1:-start}" in
       echo "Serveur lancé (PID $(cat "$PID_FILE")). Logs : $LOG_FILE"
     fi
     echo "→ http://localhost:$PORT"
-    # Affiche les adresses LAN courantes (utile si l'IP DHCP change)
-    ips=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+    # Affiche les adresses LAN courantes (utile si l'IP DHCP change).
+    # `|| true` : hors Linux, `ip` n'existe pas et `set -euo pipefail`
+    # arrêterait le script juste après un démarrage réussi.
+    ips=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)
     for ip in $ips; do echo "→ http://$ip:$PORT"; done
     host=$(hostname -f 2>/dev/null || hostname)
     [ -n "$host" ] && echo "→ http://$host:$PORT  (si le DNS résout ce nom)"

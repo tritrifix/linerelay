@@ -21,9 +21,53 @@ const express = require("express");
 const divia = require("divia-api");
 const GtfsRT = require("gtfs-realtime-bindings");
 
+/**
+ * Charge le fichier `.env` du projet s'il existe, sans dépendance externe
+ * (Node 18 ne connaît pas encore `--env-file`). Les variables déjà présentes
+ * dans l'environnement restent prioritaires : `PORT=8080 npm start`, Docker
+ * Compose ou systemd gagnent toujours sur le fichier.
+ *
+ * Format accepté : `CLE=valeur`, guillemets simples ou doubles optionnels,
+ * `#` en début de ligne ou après la valeur pour un commentaire. Les valeurs
+ * sur plusieurs lignes ne sont pas gérées (aucun besoin ici).
+ */
+function loadDotEnv(file = path.join(__dirname, ".env")) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return; // pas de .env : on s'en tient aux valeurs par défaut
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (!m) continue; // ligne vide ou commentaire
+    const key = m[1];
+    let value = m[2].trim();
+    if (/^".*"$/.test(value) || /^'.*'$/.test(value)) value = value.slice(1, -1);
+    else value = value.replace(/\s+#.*$/, "").trim();
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+loadDotEnv();
+
 // Configuration : tout est surchargeable par variable d'environnement
 // (cf. .env.example). Les valeurs par défaut ciblent le réseau de Dijon.
-const PORT = process.env.PORT || 3000;
+//
+// PORT est le seul réglage à changer pour déplacer le serveur : il vaut pour
+// `npm start`, `npm run dev`, Docker (port interne) et Compose (port publié
+// sur l'hôte, sauf si HOST_PORT le dissocie).
+// PORT=0 est accepté : le système attribue alors un port libre, affiché au
+// démarrage. Une valeur non numérique est une erreur de configuration, pas un
+// retour silencieux à 3000 : on s'arrête tout de suite.
+const PORT =
+  process.env.PORT === undefined || process.env.PORT.trim() === ""
+    ? 3000
+    : Number(process.env.PORT);
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
+  console.error(`PORT invalide : « ${process.env.PORT} » (attendu : 0-65535).`);
+  process.exit(1);
+}
+
 const VEHICLE_FEED =
   process.env.VEHICLE_FEED_URL ||
   "https://proxy.transport.data.gouv.fr/resource/divia-dijon-gtfs-rt-vehicle-position";
@@ -480,4 +524,25 @@ app.get("/api/line5/schedules/:stopId", (req, res, next) => l5Id().then((id) => 
 
 app.get("/api/health", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
-app.listen(PORT, () => console.log(`LineRelay → http://localhost:${PORT}`));
+// Les écouteurs sont posés en dehors de `app.listen` : un callback passé à
+// `listen` serait aussi appelé en cas d'échec, avant que l'adresse existe.
+const server = app.listen(PORT);
+server.on("listening", () => {
+  // PORT=0 : le port réellement attribué n'est connu qu'ici.
+  const { port } = server.address();
+  console.log(`LineRelay → http://localhost:${port}`);
+});
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} déjà occupé. Changez PORT (dans .env, ou PORT=8080 npm start).`,
+    );
+  } else if (err.code === "EACCES") {
+    console.error(
+      `Port ${PORT} interdit sans privilèges. Choisissez un PORT >= 1024.`,
+    );
+  } else {
+    console.error(`Impossible d'écouter sur le port ${PORT} :`, err.message);
+  }
+  process.exit(1);
+});

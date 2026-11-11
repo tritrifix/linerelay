@@ -99,6 +99,9 @@ COPY --from=assets /build/divia-scripts/ ./divia-scripts/
 # modifier, et on évite une couche de `chown` sur tout node_modules.
 USER node
 
+# Port par défaut de l'image, surchargeable au lancement :
+#   docker run -e PORT=8080 -p 8080:8080 linerelay
+# EXPOSE est purement déclaratif : il documente 3000 sans figer PORT.
 EXPOSE 3000
 
 # La sonde interroge l'application elle-même ; aucun outil externe requis.

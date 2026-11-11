@@ -60,6 +60,15 @@ if [ -d "$REPO_DIR" ]; then
     || echo "Avertissement : dépendances Python non installées — repli désactivé, source principale OK."
 fi
 
+# ------------------------------------------------------------ configuration ---
+# Un .env présent dès l'installation rend la configuration (port en tête)
+# modifiable sans toucher au code : server.js et start.sh le lisent tous deux.
+if [ ! -f .env ] && [ -f .env.example ]; then
+  log "Création de .env à partir de .env.example…"
+  cp .env.example .env
+  echo "→ Éditez .env pour changer le port (PORT=…) ou les flux de données."
+fi
+
 # ---------------------------------------------------------------- node app ---
 log "Installation des dépendances npm…"
 npm install
@@ -89,7 +98,9 @@ fi
 log "Démarrage de l'application…"
 ./start.sh
 
-log "Terminé. Carte disponible sur http://localhost:${PORT:-3000}"
+APP_PORT="${PORT:-$(sed -n 's/^[[:space:]]*PORT[[:space:]]*=[[:space:]]*\([0-9]\{1,5\}\).*/\1/p' .env 2>/dev/null | tail -n1 || true)}"
+log "Terminé. Carte disponible sur http://localhost:${APP_PORT:-3000}"
+log "Pour changer de port : modifiez PORT dans .env, puis ./start.sh"
 if [ "${SKIP_CRON:-0}" != "1" ]; then
   log "Le service redémarrera automatiquement à chaque boot (cron @reboot)."
 fi

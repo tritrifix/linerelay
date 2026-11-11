@@ -6,13 +6,20 @@
 #   make push     publie l'image sur GHCR (TAG=v1.0.0)
 #   make deploy   à exécuter SUR le serveur : pull + up -d
 #
-# Surcharges possibles :  HOST_PORT=8080 make dev   /   TAG=v1.0.0 make push
+# Surcharges possibles :  PORT=8080 make dev   /   TAG=v1.0.0 make push
 
 SHELL := /bin/bash
 IMAGE ?= ghcr.io/tritrifix/linerelay
 TAG ?= dev
-HOST_PORT ?= 3000
 COMPOSE ?= docker compose
+
+# Port : la ligne de commande (`PORT=8080 make dev`) d'abord, puis PORT du
+# fichier .env, puis 3000. HOST_PORT ne sert qu'à publier le service sur un
+# port de l'hôte différent de celui écouté dans le conteneur.
+DOTENV_PORT := $(shell sed -n 's/^[[:space:]]*PORT[[:space:]]*=[[:space:]]*\([0-9]\{1,5\}\).*/\1/p' .env 2>/dev/null | tail -n1)
+PORT ?= $(if $(DOTENV_PORT),$(DOTENV_PORT),3000)
+HOST_PORT ?= $(PORT)
+export PORT HOST_PORT
 
 .DEFAULT_GOAL := help
 .PHONY: help dev up down logs sh build smoke push deploy prod-logs prod-down clean
@@ -20,13 +27,14 @@ COMPOSE ?= docker compose
 help: ## Affiche cette aide
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[1;35m%-12s\033[0m %s\n", $$1, $$2}'
+	@printf "\n  Port courant : \033[1;35m%s\033[0m (hôte : %s) — PORT=8080 make dev pour en changer.\n" "$(PORT)" "$(HOST_PORT)"
 
 # ----------------------------------------------------------- développement --
 dev: ## Démarre en dev (premier plan, rechargement à chaud)
-	HOST_PORT=$(HOST_PORT) $(COMPOSE) up --build
+	$(COMPOSE) up --build
 
 up: ## Démarre en dev en arrière-plan
-	HOST_PORT=$(HOST_PORT) $(COMPOSE) up --build -d
+	$(COMPOSE) up --build -d
 
 down: ## Arrête l'environnement de dev
 	$(COMPOSE) down
@@ -43,7 +51,7 @@ build: ## Construit l'image de production
 
 smoke: build ## Construit puis vérifie /api/health
 	@docker rm -f linerelay-smoke >/dev/null 2>&1 || true
-	docker run -d --name linerelay-smoke -p $(HOST_PORT):3000 $(IMAGE):$(TAG)
+	docker run -d --name linerelay-smoke -e PORT=$(PORT) -p $(HOST_PORT):$(PORT) $(IMAGE):$(TAG)
 	@echo "Attente de la sonde de santé…"
 	@for i in $$(seq 1 30); do \
 	  if curl -sf http://127.0.0.1:$(HOST_PORT)/api/health >/dev/null; then \

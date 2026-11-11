@@ -12,6 +12,12 @@
 # reproductible (et un retour arrière immédiat) :
 #   LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:v1.0.0 \
 #     docker compose -f compose.prod.yaml up -d
+#
+# Port : PORT (dans .env sur le serveur) change le port d'écoute ET le port
+# publié sur l'hôte. HOST_PORT ne sert qu'à dissocier les deux, par exemple
+# derrière un reverse proxy qui attaque un autre port que 3000 :
+#
+#   PORT=8080 docker compose -f compose.prod.yaml up -d
 
 name: linerelay
 
@@ -21,10 +27,10 @@ services:
     pull_policy: always
     init: true
     ports:
-      - "${HOST_PORT:-3000}:3000"
+      - "${HOST_PORT:-${PORT:-3000}}:${PORT:-3000}"
     environment:
       NODE_ENV: production
-      PORT: 3000
+      PORT: ${PORT:-3000}
       TZ: ${TZ:-Europe/Paris}
     env_file:
       - path: .env
