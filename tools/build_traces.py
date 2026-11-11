@@ -15,9 +15,9 @@ import csv, io, json, os, sys, urllib.request, zipfile, socket
 
 # Jeu de données GTFS statique à utiliser ; surchargeable par variable
 # d'environnement (cf. .env.example). Défaut : réseau de Dijon Métropole.
-GTFS_URL = os.environ.get(
-    "GTFS_STATIC_URL",
-    "https://www.data.gouv.fr/api/1/datasets/r/e0dbd217-15cd-4e28-9459-211a27511a34",
+GTFS_URL = (
+    os.environ.get("GTFS_STATIC_URL")
+    or "https://www.data.gouv.fr/api/1/datasets/r/e0dbd217-15cd-4e28-9459-211a27511a34"
 )
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "public", "traces.json")

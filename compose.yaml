@@ -1,0 +1,55 @@
+# LineRelay — environnement de DÉVELOPPEMENT local.
+#
+#   docker compose up --build       démarre avec rechargement à chaud
+#   docker compose logs -f          suit les logs
+#   docker compose down             arrête
+#
+# Le code est monté depuis l'hôte fichier par fichier (et non le dossier
+# entier) pour ne pas masquer public/traces.json, qui est généré dans l'image.
+# `node --watch` redémarre le serveur à chaque sauvegarde depuis l'éditeur.
+#
+# Port de l'hôte : 3000 par défaut, surchargeable par HOST_PORT dans .env
+# (utile si un autre service occupe déjà ce port).
+
+name: linerelay
+
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+      args:
+        # Vide = valeur par défaut du script (GTFS de Dijon Métropole).
+        GTFS_STATIC_URL: ${GTFS_STATIC_URL:-}
+        # SKIP_TRACES=1 pour construire sans réseau (carte sans polylignes).
+        SKIP_TRACES: ${SKIP_TRACES:-0}
+    image: linerelay:dev
+    command: ["node", "--watch", "server.js"]
+    init: true
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      TZ: ${TZ:-Europe/Paris}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./server.js:/app/server.js:ro
+      - ./fallback_gtfs.py:/app/fallback_gtfs.py:ro
+      - ./tools:/app/tools:ro
+      - ./public/index.html:/app/public/index.html:ro
+      - ./public/style.css:/app/public/style.css:ro
+      - ./public/app.js:/app/public/app.js:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped

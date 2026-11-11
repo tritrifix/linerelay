@@ -5,7 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build:traces": "python3 tools/build_traces.py"
+    "dev": "node --watch server.js",
+    "build:traces": "python3 tools/build_traces.py",
+    "docker:dev": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:build": "docker build -t linerelay:dev .",
+    "docker:deploy": "docker compose -f compose.prod.yaml pull && docker compose -f compose.prod.yaml up -d"
   },
   "engines": {
     "node": ">=18"

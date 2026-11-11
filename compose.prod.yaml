@@ -1,0 +1,66 @@
+# LineRelay — déploiement de PRODUCTION.
+#
+# Ce fichier ne construit rien : il tire une image déjà construite et testée,
+# publiée sur GitHub Container Registry.
+#
+#   echo "$GHCR_TOKEN" | docker login ghcr.io -u tritrifix --password-stdin
+#   docker compose -f compose.prod.yaml pull
+#   docker compose -f compose.prod.yaml up -d
+#   docker compose -f compose.prod.yaml logs -f
+#
+# Épingler une version précise plutôt que `latest` pour un déploiement
+# reproductible (et un retour arrière immédiat) :
+#   LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:v1.0.0 \
+#     docker compose -f compose.prod.yaml up -d
+
+name: linerelay
+
+services:
+  app:
+    image: ${LINERELAY_IMAGE:-ghcr.io/tritrifix/linerelay:latest}
+    pull_policy: always
+    init: true
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: ${TZ:-Europe/Paris}
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    stop_grace_period: 10s
+
+    # L'application n'écrit rien sur disque : système de fichiers en lecture
+    # seule, /tmp en mémoire pour le repli Python.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+    # Garde-fous : l'application tient dans très peu de ressources.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,8 @@
+# Dépendances Python du repli horaires GTFS-RT (fallback_gtfs.py).
+# Installées dans /opt/venv dans l'image, jamais dans le Python du système.
+#
+# Ce repli est best-effort : si ces paquets manquent, fallback_gtfs.py renvoie
+# une liste vide et le backend dégrade proprement vers son cache.
+requests==2.32.3
+gtfs-realtime-bindings==1.0.0
+protobuf>=4.21,<6

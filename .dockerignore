@@ -1,0 +1,50 @@
+# Contexte de build minimal : tout ce qui n'est pas nécessaire à l'image.
+
+# Git et CI
+.git
+.gitignore
+.github
+
+# Dépendances et artefacts locaux — l'image les reconstruit
+node_modules
+.venv
+venv
+__pycache__
+**/__pycache__
+*.py[cod]
+
+# Clone du dépôt de scripts : l'image le refait elle-même
+divia-scripts
+
+# Généré dans l'image par l'étage « assets »
+public/traces.json
+
+# Exécution locale
+*.log
+*.pid
+.server.pid
+
+# Secrets et configuration locale — ne doivent jamais entrer dans une image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets
+
+# Docker / docs : inutiles dans l'image
+compose*.yaml
+compose*.yml
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+Makefile
+README.md
+docs
+
+# IDE / OS
+.idea
+.vscode
+*.swp
+.DS_Store

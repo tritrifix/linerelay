@@ -1,0 +1,84 @@
+name: Publier l'image Docker
+
+# Construit l'image LineRelay et la publie sur GitHub Container Registry.
+#   - push sur main        -> ghcr.io/<owner>/linerelay:main + :sha-<court>
+#   - tag v*               -> :v1.2.3, :1.2, :1, :latest
+#   - pull request         -> build de vérification, sans publication
+#   - déclenchement manuel -> onglet Actions
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Préparer Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Se connecter à GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calculer les tags et labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Le build télécharge le GTFS statique pour générer les tracés : le
+      # runner a accès au réseau, mais la source peut être momentanément
+      # indisponible. En cas d'échec, relancer le job.
+      - name: Construire et publier
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Vérifier que l'image démarre
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          docker run -d --name linerelay-check -p 3000:3000 "$IMAGE"
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/api/health >/dev/null; then
+              echo "Sonde de santé OK"
+              docker rm -f linerelay-check
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "L'image ne répond pas sur /api/health" >&2
+          docker logs linerelay-check >&2
+          docker rm -f linerelay-check
+          exit 1

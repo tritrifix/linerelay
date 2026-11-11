@@ -27,6 +27,21 @@ Aucune clé d'API n'est nécessaire.
 
 ## Installation
 
+### Avec Docker (recommandé)
+
+```bash
+git clone git@github.com:tritrifix/linerelay.git
+cd linerelay
+make dev          # ou : docker compose up --build
+# puis ouvrir http://localhost:3000
+```
+
+Le code est monté depuis l'hôte et le serveur redémarre à chaque sauvegarde.
+Le workflow complet — développement local, publication de l'image sur GHCR,
+déploiement en production — est décrit dans **[docs/DOCKER.md](docs/DOCKER.md)**.
+
+### Sans Docker
+
 ```bash
 git clone git@github.com:tritrifix/linerelay.git
 cd linerelay
@@ -112,7 +127,14 @@ linerelay/
 │   ├── style.css
 │   ├── app.js             carte, sélecteur, arrêts, popups, véhicules, MàJ 30 s
 │   └── traces.json        généré, non versionné
-├── install.sh / start.sh
+├── Dockerfile             image multi-étages (npm, tracés GTFS, runtime)
+├── compose.yaml           développement local, rechargement à chaud
+├── compose.prod.yaml      déploiement : tire l'image publiée sur GHCR
+├── Makefile               raccourcis : dev, build, smoke, push, deploy
+├── docker/                requirements Python du repli
+├── docs/DOCKER.md          workflow dev → image → production
+├── .github/workflows/     build et publication de l'image sur GHCR
+├── install.sh / start.sh  installation hors conteneur
 └── .env.example
 ```
 
