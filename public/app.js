@@ -6,14 +6,21 @@
 
   const DIJON = [47.3215, 5.0415];
   const REFRESH_MS = 30000;
-  const STORAGE_KEY = "divia.selectedLine"; // mémorise la ligne choisie (persistée au rechargement)
+  const STORAGE_KEY = "linerelay.selectedLine"; // mémorise la ligne choisie (persistée au rechargement)
   const VELODI_VALUE = "velodi"; // valeur sentinelle du menu pour le mode stations vélo
-  const VELODI_COLOR = "#1db954"; // vert vélo, distinct des couleurs de lignes
+  const VELODI_COLOR = "#127a3a"; // vert vélo, distinct des couleurs de lignes (contraste AA avec le blanc)
 
-  const map = L.map("map", { zoomControl: true }).setView(DIJON, 13);
+  // Préférences : lecture sous le nom actuel, puis sous l'ancien préfixe
+  // « divia. » pour ne pas perdre le choix déjà mémorisé par un visiteur.
+  const readPref = (key) => localStorage.getItem(key) ?? localStorage.getItem(key.replace(/^linerelay\./, "divia."));
+
+  // Les boutons de zoom vont en bas à droite : en haut à gauche, leur place
+  // par défaut, ils étaient recouverts par la barre de sélection.
+  const map = L.map("map", { zoomControl: false }).setView(DIJON, 13);
+  L.control.zoom({ position: "bottomright", zoomInTitle: "Zoomer", zoomOutTitle: "Dézoomer" }).addTo(map);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
-    attribution: "© OpenStreetMap",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">les contributeurs OpenStreetMap</a>',
   }).addTo(map);
 
   const routeLayer = L.layerGroup().addTo(map);
@@ -29,10 +36,26 @@
   let velodiActive = false; // true quand la catégorie DiviaVélodi est sélectionnée
   let lineColor = "#888888";
   let refreshTimer = null;
+  let selectSeq = 0; // numéro de la sélection en cours : écarte les réponses d'une ligne quittée
 
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (s) =>
-    String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // Couleur de texte lisible sur un fond donné (#RRGGBB) : la plus contrastée
+  // de l'encre foncée et du blanc, selon la luminance relative WCAG. Les
+  // couleurs de ligne officielles sont souvent trop claires pour du blanc.
+  function readableOn(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return "#fff";
+    const lum = [0, 2, 4]
+      .map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)))
+      .reduce((acc, v, i) => acc + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const onWhite = 1.05 / (lum + 0.05);
+    const onInk = (lum + 0.05) / (0.0151 + 0.05); // 0,0151 = luminance de l'encre #1c2230
+    return onWhite >= onInk ? "#fff" : "#1c2230";
+  }
 
   function setStatus(state, label) {
     const el = $("status");
@@ -106,8 +129,8 @@
 
   /* ----------------------- retards (GTFS-RT) --------------------------- */
   let delaysByCode = {}; // codeGTFS -> { delay: minutes|null, skipped: bool }
-  const DELAYS_KEY = "divia.showDelays"; // mémorise l'affichage des retards
-  let showDelays = localStorage.getItem(DELAYS_KEY) === "1"; // OFF par défaut
+  const DELAYS_KEY = "linerelay.showDelays"; // mémorise l'affichage des retards
+  let showDelays = readPref(DELAYS_KEY) === "1"; // OFF par défaut
 
   // Icône d'arrêt + éventuel badge de retard. info = entrée delaysByCode.
   function stopIcon(info) {
@@ -191,7 +214,7 @@
 
     sel.addEventListener("change", () => selectLine(sel.value));
     // Restaure le dernier choix s'il existe toujours ; sinon, aucun.
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = readPref(STORAGE_KEY);
     if (saved === VELODI_VALUE || (saved && data.lines.some((l) => l.id === saved))) {
       sel.value = saved;
       return saved;
@@ -202,8 +225,10 @@
 
   /* --------------------------- sélection ligne -------------------------- */
   async function selectLine(lineId) {
+    const seq = ++selectSeq;
     openStopId = null;
     velodiActive = false;
+    $("delays-toggle").hidden = lineId === VELODI_VALUE; // sans objet pour les stations vélo
     routeLayer.clearLayers();
     stopLayer.clearLayers();
     busLayer.clearLayers();
@@ -239,13 +264,14 @@
     try {
       // Tracé + arrêts en parallèle (2 requêtes seulement)
       const [route, stopsData] = await Promise.all([api(lineUrl("/route")), api(lineUrl("/stops"))]);
+      if (seq !== selectSeq) return; // une autre ligne a été choisie entre-temps
 
       const meta = lineMeta.get(currentLineId);
       applyLineColor((meta && meta.color) || (stopsData.line && stopsData.line.color) || route.color);
       if (stopsData.line) {
         $("line-badge").textContent = stopsData.line.code;
         $("line-badge").style.background = lineColor;
-        $("line-badge").style.color = (meta && meta.text_color) || "#fff";
+        $("line-badge").style.color = readableOn(lineColor);
       }
       $("line-service").textContent = formatService(meta);
 
@@ -258,9 +284,14 @@
       for (const s of stopsData.stops) {
         const marker = L.marker([s.lat, s.lon], { icon: stopIcon(null), title: s.name });
         marker.bindPopup('<div class="popup-title">' + escapeHtml(s.name) + "</div>…", { minWidth: 220 });
-        marker.on("click", () => {
+        // Chargement à l'ouverture de la popup, et non au clic : Leaflet ouvre
+        // aussi la popup au clavier (Entrée), sans émettre de clic.
+        marker.on("popupopen", () => {
           openStopId = s.id;
           refreshPopup(s.id, s.name);
+        });
+        marker.on("popupclose", () => {
+          if (openStopId === s.id) openStopId = null;
         });
         marker.addTo(stopLayer);
         stopMarkers.set(s.id, { marker, name: s.name, gtfsCode: s.gtfsCode });
@@ -269,9 +300,11 @@
       if (bounds.length) map.fitBounds(bounds, { padding: [50, 50] });
 
       if (showDelays) await loadDelays();
+      if (seq !== selectSeq) return;
       applyDelayBadges();
       await tick();
     } catch (e) {
+      if (seq !== selectSeq) return;
       setStatus("error", "Ligne indisponible");
       console.warn("selectLine", e.message);
     }
@@ -283,7 +316,7 @@
     try {
       const data = await api(lineUrl("/schedules/" + encodeURIComponent(stopId) + "?limit=3"));
       const rows = renderPassages(data.passages);
-      const foot = data.source === "gtfs-rt-fallback" ? "GTFS-RT (repli)" : "temps réel Divia";
+      const foot = data.source === "gtfs-rt-fallback" ? "GTFS-RT (repli)" : "temps réel · Navitia";
       entry.marker.setPopupContent(
         '<div class="popup-title">' + escapeHtml(name) + "</div>" +
           (rows || '<div class="popup-empty">Aucun passage à venir.</div>') +
@@ -312,7 +345,7 @@
   const plural = (n) => (n > 1 ? "s" : "");
 
   function velodiPopup(st) {
-    const num = st.number ? ' <span class="velodi-num">n°' + st.number + "</span>" : "";
+    const num = st.number ? ' <span class="velodi-num">n°' + escapeHtml(st.number) + "</span>" : "";
     const ebikes = st.ebikes
       ? '<div class="velodi-stat">⚡ ' + st.ebikes + " électrique" + plural(st.ebikes) + "</div>"
       : "";
@@ -332,7 +365,7 @@
     applyLineColor(VELODI_COLOR);
     $("line-badge").textContent = "Vélodi";
     $("line-badge").style.background = VELODI_COLOR;
-    $("line-badge").style.color = "#fff";
+    $("line-badge").style.color = readableOn(VELODI_COLOR);
     $("line-service").textContent = "";
     setStatus("stale", "Chargement…");
     await tickVelodi(true);
@@ -371,8 +404,10 @@
   async function tick() {
     if (velodiActive) return tickVelodi(false);
     if (!currentLineId) return;
+    const lineAtStart = currentLineId;
     try {
       const data = await api(lineUrl("/vehicles"));
+      if (lineAtStart !== currentLineId) return; // la ligne a changé pendant l'appel
       busLayer.clearLayers();
       for (const v of data.vehicles || []) {
         L.marker([v.lat, v.lon], {

@@ -4,6 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
     <title>LineRelay — Carte des transports en temps réel · Dijon</title>
+    <meta
+      name="description"
+      content="Carte interactive des transports en commun de Dijon Métropole : tracés, arrêts, prochains passages et véhicules en temps réel. Projet indépendant."
+    />
+    <link rel="icon" href="data:," />
 
     <link
       rel="stylesheet"
@@ -14,9 +19,8 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div id="map"></div>
-
     <header id="topbar">
+      <h1 class="sr-only">LineRelay — carte des transports en temps réel de Dijon Métropole</h1>
       <span class="badge" id="line-badge">—</span>
       <select id="line-select" aria-label="Choisir une ligne">
         <option>Chargement…</option>
@@ -25,10 +29,14 @@
       <button id="delays-toggle" class="toggle" type="button" aria-pressed="false" title="Afficher les retards">⏱ Retards</button>
     </header>
 
+    <main>
+      <div id="map" role="application" aria-label="Carte interactive : tracé, arrêts et véhicules de la ligne choisie"></div>
+    </main>
+
     <div id="status" class="status">
-      <span class="dot" id="status-dot"></span>
+      <span class="dot" aria-hidden="true"></span>
       <div class="status-text">
-        <strong id="status-label">Connexion…</strong>
+        <strong id="status-label" role="status">Connexion…</strong>
         <small id="status-time">—</small>
       </div>
       <button id="refresh-btn" type="button" title="Actualiser les positions maintenant" aria-label="Actualiser maintenant">↻</button>
@@ -39,6 +47,7 @@
       <div><span class="lg-stop"></span> Arrêt</div>
       <div><span class="lg-bus"></span> Véhicule temps réel</div>
       <div><span class="lg-velodi"></span> Station DiviaVélodi (vélos dispo)</div>
+      <p class="lg-note">Projet indépendant, non affilié à Divia ni à Keolis. Données open data.</p>
     </div>
 
     <script
