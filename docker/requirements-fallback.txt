@@ -8,7 +8,7 @@
 # reproductible. Dependabot propose les mises à jour.
 requests==2.34.2
 gtfs-realtime-bindings==1.0.0
-protobuf==5.29.6
+protobuf==7.36.2
 certifi==2026.10.23
 charset-normalizer==3.5.2
 idna==3.20
