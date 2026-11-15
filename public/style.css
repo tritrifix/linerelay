@@ -1,5 +1,5 @@
 :root {
-  --line: #ea619f; /* couleur officielle L5 ; surchargée dynamiquement par l'API */
+  --line: #ea619f; /* couleur d'attente ; remplacée par celle de la ligne choisie */
   --ink: #1c2230;
   --panel: rgba(255, 255, 255, 0.96);
   --shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
@@ -20,6 +20,21 @@ body {
   inset: 0;
   z-index: 0;
 }
+/* Présent pour les lecteurs d'écran, absent de l'affichage. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+[hidden] {
+  display: none !important;
+}
 
 /* Barre titre */
 #topbar {
@@ -35,6 +50,8 @@ body {
   border-radius: 999px;
   box-shadow: var(--shadow);
   font-weight: 600;
+  /* Ne passe jamais sous le panneau de statut (à droite) ni hors de l'écran. */
+  max-width: calc(100vw - 24px - 270px);
 }
 .badge {
   background: var(--line);
@@ -75,7 +92,7 @@ body {
 .toggle.active {
   background: #f5a623;
   border-color: #f5a623;
-  color: #fff;
+  color: var(--ink);
 }
 #line-select {
   font: inherit;
@@ -85,13 +102,16 @@ body {
   background: #fff;
   border-radius: 8px;
   padding: 6px 10px;
-  max-width: 60vw;
+  /* Se réduit pour laisser la place au badge et au bouton des retards. */
+  flex: 1 1 auto;
+  min-width: 0;
   cursor: pointer;
-  outline: none;
 }
-#line-select:focus {
-  border-color: var(--line);
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+#line-select:focus-visible,
+.toggle:focus-visible,
+#refresh-btn:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
 }
 
 /* Indicateur de statut (haut droite) */
@@ -140,7 +160,7 @@ body {
   border-radius: 50%;
   border: 1px solid #d6dae2;
   background: #fff;
-  color: var(--line);
+  color: var(--ink);
   font-size: 17px;
   line-height: 1;
   cursor: pointer;
@@ -209,9 +229,18 @@ body {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #1db954;
+  background: #127a3a;
   border: 2px solid #fff;
-  box-shadow: 0 0 0 1px #1db954;
+  box-shadow: 0 0 0 1px #127a3a;
+}
+.lg-note {
+  margin: 2px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid #e3e6ec;
+  max-width: 230px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #5a6270;
 }
 
 /* Marqueur arrêt */
@@ -240,9 +269,10 @@ body {
 }
 .delay-badge.late {
   background: #f5a623;
+  color: var(--ink);
 }
 .delay-badge.skip {
-  background: #e0245e;
+  background: #c81e52;
 }
 
 /* Marqueur bus (véhicule temps réel) */
@@ -264,7 +294,7 @@ body {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #1db954;
+  background: #127a3a;
   border: 2px solid #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   display: grid;
@@ -276,14 +306,17 @@ body {
 }
 .velodi-marker.empty {
   background: #b9bec7;
+  color: var(--ink);
 }
 .velodi-marker.off {
-  background: #9aa0a6;
-  opacity: 0.75;
+  background: #c9cdd4;
+  color: var(--ink);
+  border-style: dashed;
+  border-color: #5a6270;
 }
 .velodi-num {
   font-weight: 600;
-  color: #8a909c;
+  color: #5a6270;
   font-size: 12px;
 }
 .velodi-stat {
@@ -326,20 +359,43 @@ body {
   background: #b9bec7;
 }
 .popup-empty {
-  color: #777;
+  color: #5a6270;
   font-size: 13px;
 }
 .popup-foot {
   margin-top: 6px;
   font-size: 11px;
-  color: #8a909c;
+  color: #5a6270;
 }
 
+/* Écrans étroits : la barre prend toute la largeur sur une seule rangée et
+   le panneau de statut passe dessous, au lieu de la recouvrir. */
+@media (max-width: 900px) {
+  #topbar {
+    right: 12px;
+    max-width: none;
+  }
+  .status {
+    top: 72px;
+    max-width: calc(100vw - 24px);
+    padding: 6px 12px;
+  }
+}
 @media (max-width: 600px) {
-  #line-name {
+  .service {
     display: none;
   }
   .legend {
     font-size: 12px;
+  }
+  .lg-note {
+    max-width: 200px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
 }
