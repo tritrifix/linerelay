@@ -433,6 +433,82 @@ async function getAllSchedules(lineId, limit = 3) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Cap des véhicules (fonctions pures)                                */
+/* ------------------------------------------------------------------ */
+// En dessous de cette distance entre deux relevés, le bruit GPS domine : ni
+// cap estimé, ni déplacement constaté.
+const HEADING_MIN_DISTANCE_M = 15;
+// Une position de référence plus ancienne ne sert plus à estimer un cap.
+const HEADING_MEMORY_MS = 5 * 60 * 1000;
+// Le flux publie parfois des vitesses aberrantes (plus de 130 km/h en ville) :
+// au-delà de ce seuil, la valeur est signalée comme non fiable.
+const SPEED_MAX_PLAUSIBLE_KMH = 100;
+const EARTH_RADIUS_M = 6371000;
+const toRad = (deg) => (deg * Math.PI) / 180;
+
+const own = (obj, key) => obj != null && Object.prototype.hasOwnProperty.call(obj, key);
+const validPos = (p) => !!p && Number.isFinite(p.lat) && Number.isFinite(p.lon);
+
+// Ramène un cap dans [0, 360). null si la valeur n'est pas un nombre fini.
+// 0 est un cap valide (plein nord) et ne doit jamais être confondu avec l'absence.
+function normalizeBearing(deg) {
+  if (deg == null || deg === "" || typeof deg === "boolean") return null;
+  const n = Number(deg);
+  if (!Number.isFinite(n)) return null;
+  return (Math.round((((n % 360) + 360) % 360) * 10) / 10) % 360;
+}
+
+// Distance en mètres entre deux positions { lat, lon } (formule de haversine).
+function distanceMeters(a, b) {
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// Azimut initial de `from` vers `to`, en degrés dans [0, 360) : 0 = nord,
+// 90 = est. atan2 renvoie (-180, 180] ; le modulo gère le passage par le nord.
+function bearingBetween(from, to) {
+  const dLon = toRad(to.lon - from.lon);
+  const y = Math.sin(dLon) * Math.cos(toRad(to.lat));
+  const x =
+    Math.cos(toRad(from.lat)) * Math.sin(toRad(to.lat)) -
+    Math.sin(toRad(from.lat)) * Math.cos(toRad(to.lat)) * Math.cos(dLon);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+// Écart angulaire entre deux caps, dans [0, 180] (359° et 1° sont à 2°).
+function angleDiff(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+const HEADING_CONTRADICTION_MIN_M = 40;
+const HEADING_CONTRADICTION_DEG = 120;
+
+// Cap d'un véhicule et provenance de l'information :
+//   "bearing" : champ bearing du flux ;
+//   "estimé"  : azimut entre deux positions successives assez éloignées ;
+//   "inconnu" : information insuffisante, heading vaut null.
+//
+// Le bearing du flux est prioritaire, sauf s'il est démenti par un déplacement
+// net : il arrive que le flux annonce le cap opposé au sens de marche réel
+// (tramway constaté à 251° alors qu'il avançait à 71°). Un écart d'au moins
+// 120° sur au moins 40 m ne s'explique ni par un virage ni par le bruit GPS :
+// le cap estimé l'emporte alors, et il est signalé comme tel.
+function computeHeading({ bearing, prev, cur, minDistanceM = HEADING_MIN_DISTANCE_M } = {}) {
+  const fromFeed = normalizeBearing(bearing);
+  const moved = validPos(prev) && validPos(cur) ? distanceMeters(prev, cur) : 0;
+  const estimated = moved >= minDistanceM ? normalizeBearing(Math.round(bearingBetween(prev, cur))) : null;
+  if (fromFeed != null) {
+    const contradicted =
+      estimated != null && moved >= HEADING_CONTRADICTION_MIN_M && angleDiff(fromFeed, estimated) >= HEADING_CONTRADICTION_DEG;
+    return contradicted ? { heading: estimated, source: "estimé" } : { heading: fromFeed, source: "bearing" };
+  }
+  if (estimated != null) return { heading: estimated, source: "estimé" };
+  return { heading: null, source: "inconnu" };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Positions des véhicules (GTFS-RT, décodage natif Node)             */
 /*  Le flux est décodé une fois et indexé par route_id (TTL 10 s),     */
 /*  donc changer de ligne ne déclenche pas de nouvelle requête.        */
@@ -794,4 +870,8 @@ module.exports = {
   transformSchedules,
   schedulesWithFallback,
   buildDelayIndex,
+  normalizeBearing,
+  distanceMeters,
+  bearingBetween,
+  computeHeading,
 };
