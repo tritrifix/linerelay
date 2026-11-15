@@ -7,6 +7,23 @@ version le [versionnage sémantique](https://semver.org/lang/fr/).
 Un tag Git `vX.Y.Z` publie l'image `ghcr.io/tritrifix/linerelay` sous les tags
 `X.Y.Z`, `X.Y`, `X` et `latest` (voir [docs/DOCKER.md](docs/DOCKER.md)).
 
+## [1.1.1] - 2026-11-15
+
+Version de maintenance : aucun changement de l'application ni de son API.
+
+### Modifié
+
+- `package.json` aligné sur la version publiée.
+- Documentation alignée sur le code : tags d'image réels (sans préfixe « v »),
+  comparatif développement / production, direction des véhicules et champs de
+  `GET /api/lines/:lineId/vehicles`, procédure de sortie d'une version.
+- `start.sh` : le processus PM2 s'appelle désormais `linerelay` ; l'ancien nom
+  est encore arrêté lors d'une mise à jour.
+
+### Ajouté
+
+- Ce journal des modifications.
+
 ## [1.1.0] - 2026-11-15
 
 ### Ajouté
@@ -61,5 +78,6 @@ Première version publiée : carte Leaflet d'une ligne à la fois (tracé, arrê
 prochains passages, véhicules en temps réel), retards, stations de vélos en
 libre-service, image Docker et déploiement par Compose.
 
+[1.1.1]: https://github.com/tritrifix/linerelay/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/tritrifix/linerelay/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/tritrifix/linerelay/releases/tag/v1.0.0

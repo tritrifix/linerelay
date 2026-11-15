@@ -14,7 +14,7 @@ fiche indique sa destination et son cap en toutes lettres. La flèche est creuse
 quand le cap est estimé, et absente quand le véhicule est à l'arrêt ou que son
 sens est inconnu.
 
-Version courante : **1.1.0** — voir le [journal des modifications](CHANGELOG.md).
+Version courante : **1.1.1** — voir le [journal des modifications](CHANGELOG.md).
 
 > **Projet indépendant.** LineRelay n'est **affilié ni à Keolis ni à Divia**,
 > et n'est ni approuvé ni soutenu par ces entités. Il s'appuie uniquement sur
