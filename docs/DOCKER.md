@@ -264,12 +264,12 @@ nécessaire.
 Déployer une version précise, et revenir en arrière si besoin :
 
 ```bash
-export LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:1.1.0
+export LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:1.1.1
 docker compose -f compose.prod.yaml up -d
 ```
 
 Pour revenir en arrière, la même commande avec le tag précédent
-(`:1.0.0`). Les versions publiées sont listées dans
+(`:1.1.0`). Les versions publiées sont listées dans
 [CHANGELOG.md](../CHANGELOG.md).
 
 > **Architecture de l'image.** Le workflow publie une image `linux/amd64`, qui
