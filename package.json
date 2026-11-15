@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check public/app.js && node --check docker/prune-node-modules.mjs",
     "build:traces": "python3 tools/build_traces.py",
     "docker:dev": "docker compose up --build",
     "docker:down": "docker compose down",

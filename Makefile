@@ -22,12 +22,17 @@ HOST_PORT ?= $(PORT)
 export PORT HOST_PORT
 
 .DEFAULT_GOAL := help
-.PHONY: help dev up down logs sh build smoke push deploy prod-logs prod-down clean
+.PHONY: help test dev up down logs sh build smoke push deploy prod-logs prod-down clean
 
 help: ## Affiche cette aide
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[1;35m%-12s\033[0m %s\n", $$1, $$2}'
 	@printf "\n  Port courant : \033[1;35m%s\033[0m (hôte : %s) — PORT=8080 make dev pour en changer.\n" "$(PORT)" "$(HOST_PORT)"
+
+# ------------------------------------------------------------------- tests --
+test: ## Lance les tests et la vérification de syntaxe (sans réseau)
+	npm run check
+	npm test
 
 # ----------------------------------------------------------- développement --
 dev: ## Démarre en dev (premier plan, rechargement à chaud)
@@ -49,9 +54,10 @@ sh: ## Ouvre un shell dans le conteneur de dev
 build: ## Construit l'image de production
 	docker build -t $(IMAGE):$(TAG) .
 
-smoke: build ## Construit puis vérifie /api/health
+smoke: build ## Construit puis vérifie /api/health sous les contraintes de la production
 	@docker rm -f linerelay-smoke >/dev/null 2>&1 || true
-	docker run -d --name linerelay-smoke -e PORT=$(PORT) -p $(HOST_PORT):$(PORT) $(IMAGE):$(TAG)
+	docker run -d --name linerelay-smoke --read-only --tmpfs /tmp:size=16m --cap-drop ALL \
+	  --security-opt no-new-privileges -e PORT=$(PORT) -p $(HOST_PORT):$(PORT) $(IMAGE):$(TAG)
 	@echo "Attente de la sonde de santé…"
 	@for i in $$(seq 1 30); do \
 	  if curl -sf http://127.0.0.1:$(HOST_PORT)/api/health >/dev/null; then \
