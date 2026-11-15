@@ -9,7 +9,8 @@
  *   - divia-api (proxy Navitia)      : lignes, arrêts, horaires
  *   - flux GTFS-RT (transport.gouv)  : positions des véhicules (décodé en Node)
  *   - GTFS statique (traces.json)    : tracé réel de chaque ligne
- *   - fallback Python GTFS-RT        : repli horaires si Navitia tombe
+ *   - fallback Python GTFS-RT        : repli horaires (ligne L5) si Navitia
+ *                                      est en erreur ou ne renvoie aucun passage
  *
  * Robustesse : cache par ressource avec TTL ; en cas d'échec réseau on
  * renvoie la dernière valeur connue (drapeau `stale`).
@@ -216,34 +217,73 @@ function storeSet(key, entry, max = CACHE_MAX_ENTRIES) {
   while (store.size > max) store.delete(store.keys().next().value);
 }
 
+const inflight = new Map(); // clé -> promesse du producteur en cours
+const failures = new Map(); // clé -> { err, until } : échec récent, non retenté
+const FAILURE_TTL_MS = 5000;
+
+// Un seul appel au producteur par clé à la fois : les requêtes simultanées
+// attendent le même résultat. Un échec est retenu quelques secondes, pour
+// qu'une source en panne ne soit pas rappelée à chaque requête entrante.
+function produce(key, producer, now) {
+  const failed = failures.get(key);
+  if (failed && now < failed.until) return Promise.reject(failed.err);
+  let pending = inflight.get(key);
+  if (!pending) {
+    pending = Promise.resolve()
+      .then(producer)
+      .then(
+        (value) => {
+          failures.delete(key);
+          return value;
+        },
+        (err) => {
+          failures.set(key, { err, until: Date.now() + FAILURE_TTL_MS });
+          while (failures.size > CACHE_MAX_ENTRIES) failures.delete(failures.keys().next().value);
+          console.warn(`[source] ${key.slice(0, 120)} : ${err.message}`);
+          throw err;
+        }
+      )
+      .finally(() => inflight.delete(key));
+    inflight.set(key, pending);
+  }
+  return pending;
+}
+
 async function cached(key, ttlMs, producer) {
   const hit = store.get(key);
   const now = Date.now();
   if (hit && now - hit.ts < ttlMs) return { value: hit.value, stale: false, cachedAt: hit.ts };
   try {
-    const value = await producer();
+    const value = await produce(key, producer, now);
     storeSet(key, { value, ts: now });
     return { value, stale: false, cachedAt: now };
   } catch (err) {
-    if (hit) {
-      console.warn(`[cache] ${key}: repli cache périmé (${err.message})`);
-      return { value: hit.value, stale: true, cachedAt: hit.ts, error: err.message };
-    }
+    // Repli sur la dernière valeur connue, signalée par le drapeau `stale`.
+    if (hit) return { value: hit.value, stale: true, cachedAt: hit.ts, error: err.message };
     throw err;
   }
+}
+
+// Toutes les sources externes ont un délai maximal : sans lui, une source
+// muette garderait la requête du visiteur ouverte indéfiniment.
+const SOURCE_TIMEOUT_MS = 5000;
+function fetchSource(url, options = {}) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS) });
 }
 
 /* ------------------------------------------------------------------ */
 /*  Catalogue des lignes (bus + tram)                                  */
 /* ------------------------------------------------------------------ */
-// Heures de service Navitia : l'heure locale est encodée en UTC (ex.
-// "2026-…T05:05:00.000Z" = 05h05). On lit donc les composantes UTC pour
-// éviter tout décalage de fuseau. Renvoie "HH:MM" ou null si absent.
+// Heures de service : divia-api renvoie un objet Date construit en heure
+// locale du processus (05h05 de service = 05:05 locales, quel que soit TZ).
+// On lit donc les composantes locales ; lire les composantes UTC décalait
+// l'affichage d'une heure (deux en été) avec TZ=Europe/Paris.
+// Renvoie "HH:MM" ou null si absent.
 function fmtServiceTime(v) {
   if (!v) return null;
   const d = new Date(v);
   if (isNaN(d.getTime())) return null;
-  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
 }
 
 async function getCatalog() {
@@ -331,19 +371,31 @@ async function assertStopOfLine(lineId, stopId) {
   }
 }
 
+// Le repli sert dans deux cas : la source principale répond sans passage, ou
+// elle est en erreur. Sans repli utilisable, l'erreur d'origine remonte (et
+// cached() sert alors la dernière valeur connue).
+async function schedulesWithFallback(primary, fallback) {
+  let passages = [];
+  let primaryError = null;
+  try {
+    passages = (await primary()) || [];
+  } catch (err) {
+    primaryError = err;
+  }
+  if (passages.length) return { passages, source: "divia-api" };
+  const fb = await fallback();
+  if (fb && fb.length) return { passages: fb, source: "gtfs-rt-fallback" };
+  if (primaryError) throw primaryError;
+  return { passages, source: "divia-api" };
+}
+
 async function getStopSchedules(lineId, stopId, limit = 3) {
   const line = await getLine(lineId);
   const { value, stale, cachedAt, error } = await cached(`sched:${lineId}:${stopId}`, 30 * 1000, async () => {
-    let passages = transformSchedules(await divia.getSchedules(line.id, stopId));
-    let source = "divia-api";
-    if (!passages.length) {
-      const fb = await pythonFallback(line.code, stopId);
-      if (fb && fb.length) {
-        passages = fb;
-        source = "gtfs-rt-fallback";
-      }
-    }
-    return { passages, source };
+    return schedulesWithFallback(
+      async () => transformSchedules(await divia.getSchedules(line.id, stopId)),
+      () => pythonFallback(line.code, stopId)
+    );
   });
   return { stopId, passages: value.passages.slice(0, limit), source: value.source, stale: !!stale, cachedAt, error };
 }
@@ -383,7 +435,7 @@ async function getAllSchedules(lineId, limit = 3) {
 /* ------------------------------------------------------------------ */
 async function getVehicleIndex() {
   const { value, cachedAt, stale } = await cached("veh-index", 10 * 1000, async () => {
-    const res = await fetch(VEHICLE_FEED);
+    const res = await fetchSource(VEHICLE_FEED);
     if (!res.ok) throw new Error(`flux véhicules HTTP ${res.status}`);
     const feed = GtfsRT.transit_realtime.FeedMessage.decode(Buffer.from(await res.arrayBuffer()));
     const byRoute = {};
@@ -395,6 +447,8 @@ async function getVehicleIndex() {
         lat: v.position.latitude,
         lon: v.position.longitude,
         bearing: v.position.bearing || null,
+        // Ce flux publie la vitesse en km/h (entiers de 0 à 65 environ), et non
+        // en m/s comme le prévoit la spécification GTFS-RT : transmise telle quelle.
         speed: Object.prototype.hasOwnProperty.call(v.position, "speed") ? v.position.speed : null,
         tripId: v.trip.tripId || null,
       });
@@ -412,47 +466,62 @@ async function getVehicles(lineId) {
 
 /* ------------------------------------------------------------------ */
 /*  Retards temps réel (GTFS-RT trip-update, décodage natif Node)      */
-/*  Décodé une fois et indexé par arrêt (code GTFS). Cache 30 s,        */
-/*  timeout 5 s ; en cas d'échec on dégrade vers {} (aucun badge).      */
+/*  Décodé une fois, indexé par arrêt (code GTFS) : toutes lignes       */
+/*  confondues, et ligne par ligne. Cache 30 s, délai maximal 5 s.      */
 /* ------------------------------------------------------------------ */
 const STU_SKIPPED = 1; // ScheduleRelationship.SKIPPED
 
-async function getDelayIndex() {
-  const { value, cachedAt, stale } = await cached("delays", 30 * 1000, async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000); // timeout dur 5 s
-    let feed;
-    try {
-      const res = await fetch(TRIPUPDATE_FEED, { signal: ctrl.signal });
-      if (!res.ok) throw new Error(`flux trip-update HTTP ${res.status}`);
-      feed = GtfsRT.transit_realtime.FeedMessage.decode(Buffer.from(await res.arrayBuffer()));
-    } finally {
-      clearTimeout(timer);
+// Agrège un flux trip-update décodé. Pour chaque arrêt on retient le pire
+// retard annoncé et l'éventuelle suppression. Renvoie deux index :
+//   all     : codeGTFS -> { delay (minutes), skipped }, toutes lignes
+//   byRoute : route_id GTFS -> le même index, limité à cette ligne
+// Un arrêt partagé ne porte ainsi que les retards de la ligne affichée.
+function buildDelayIndex(feed) {
+  const add = (index, code, stu) => {
+    const cur = index[code] || (index[code] = { delaySec: null, skipped: false });
+    if (stu.scheduleRelationship === STU_SKIPPED) cur.skipped = true;
+    const arr = stu.arrival, dep = stu.departure;
+    const d = arr && arr.delay != null ? arr.delay : dep && dep.delay != null ? dep.delay : null;
+    if (d != null && (cur.delaySec == null || d > cur.delaySec)) cur.delaySec = d;
+  };
+  const all = {};
+  const byRoute = {};
+  for (const e of (feed && feed.entity) || []) {
+    const tu = e.tripUpdate;
+    if (!tu) continue;
+    const routeId = tu.trip && tu.trip.routeId;
+    for (const stu of tu.stopTimeUpdate || []) {
+      const m = String(stu.stopId || "").match(/4-(\d+)/); // aligné sur gtfsCode du front
+      if (!m) continue;
+      add(all, m[1], stu);
+      if (routeId) add(byRoute[routeId] || (byRoute[routeId] = {}), m[1], stu);
     }
-    // Agrège par arrêt : on retient le pire retard à venir et l'éventuel saut.
-    const byStop = {}; // codeGTFS -> { delaySec, skipped }
-    for (const e of feed.entity) {
-      const tu = e.tripUpdate;
-      if (!tu) continue;
-      for (const stu of tu.stopTimeUpdate || []) {
-        const m = String(stu.stopId || "").match(/4-(\d+)/); // aligné sur gtfsCode du front
-        if (!m) continue;
-        const code = m[1];
-        const cur = byStop[code] || { delaySec: null, skipped: false };
-        if (stu.scheduleRelationship === STU_SKIPPED) cur.skipped = true;
-        const arr = stu.arrival, dep = stu.departure;
-        const d = arr && arr.delay != null ? arr.delay : dep && dep.delay != null ? dep.delay : null;
-        if (d != null && (cur.delaySec == null || d > cur.delaySec)) cur.delaySec = d;
-        byStop[code] = cur;
-      }
-    }
+  }
+  const finish = (index) => {
     const out = {};
-    for (const [code, v] of Object.entries(byStop)) {
+    for (const [code, v] of Object.entries(index)) {
       out[code] = { delay: v.delaySec == null ? null : Math.round(v.delaySec / 60), skipped: v.skipped };
     }
     return out;
+  };
+  const routes = {};
+  for (const [routeId, index] of Object.entries(byRoute)) routes[routeId] = finish(index);
+  return { all: finish(all), byRoute: routes };
+}
+
+async function getDelayIndex() {
+  const { value, cachedAt, stale } = await cached("delays", 30 * 1000, async () => {
+    const res = await fetchSource(TRIPUPDATE_FEED);
+    if (!res.ok) throw new Error(`flux trip-update HTTP ${res.status}`);
+    return buildDelayIndex(GtfsRT.transit_realtime.FeedMessage.decode(Buffer.from(await res.arrayBuffer())));
   });
-  return { stops: value, cachedAt, stale: !!stale };
+  return { stops: value.all, byRoute: value.byRoute, cachedAt, stale: !!stale };
+}
+
+async function getLineDelays(lineId) {
+  const line = await getLine(lineId);
+  const { byRoute, cachedAt, stale } = await getDelayIndex();
+  return { stops: byRoute[line.gtfsRouteId] || {}, cachedAt, stale };
 }
 
 /* ------------------------------------------------------------------ */
@@ -462,7 +531,7 @@ async function getDelayIndex() {
 async function getVelodiStations() {
   if (!VELODI_FEED) return { stations: [], cachedAt: Date.now(), stale: false };
   const { value, cachedAt, stale } = await cached("velodi", 20 * 1000, async () => {
-    const res = await fetch(VELODI_FEED, {
+    const res = await fetchSource(VELODI_FEED, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "User-Agent": "Mozilla/5.0",
@@ -627,6 +696,18 @@ app.get("/api/lines/delays", async (req, res) => {
     res.json({ stops, stale, updatedAt: new Date(cachedAt).toISOString() });
   } catch (e) {
     // Dégradation silencieuse : pas de retard plutôt qu'une erreur qui casserait le front.
+    res.json({ stops: {}, error: e.message, updatedAt: new Date().toISOString() });
+  }
+});
+
+// Retards de la seule ligne demandée. Ligne inconnue : 404 ; flux
+// indisponible : même dégradation silencieuse que ci-dessus.
+app.get("/api/lines/:lineId/delays", async (req, res) => {
+  try {
+    const { stops, cachedAt, stale } = await getLineDelays(req.params.lineId);
+    res.json({ stops, stale, updatedAt: new Date(cachedAt).toISOString() });
+  } catch (e) {
+    if (e instanceof HttpError) return sendError(res, e, "Impossible de récupérer les retards");
     res.json({ stops: {}, error: e.message, updatedAt: new Date().toISOString() });
   }
 });

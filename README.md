@@ -137,7 +137,8 @@ PORT=8080 ./start.sh  # autre port (voir « Changer le port »)
 |---|---|
 | `GET /api/lines` | catalogue de toutes les lignes (bus + tram) |
 | `GET /api/lines/meta` | métadonnées légères : `{ id, code, color, text_color, opening_time, closing_time }` |
-| `GET /api/lines/delays` | retards temps réel par arrêt : `{ stops: { codeGTFS: { delay, skipped } } }` |
+| `GET /api/lines/delays` | retards temps réel par arrêt, toutes lignes confondues : `{ stops: { codeGTFS: { delay, skipped } } }` |
+| `GET /api/lines/:lineId/delays` | même format, limité aux retards de la ligne |
 | `GET /api/lines/:lineId/stops` | arrêts de la ligne |
 | `GET /api/lines/:lineId/route` | tracé (une polyligne par sens) |
 | `GET /api/lines/:lineId/schedules/:stopId?limit=3` | prochains passages d'un arrêt |
@@ -186,7 +187,9 @@ linerelay/
 ```
 
 Chaque ressource est mise en cache avec un TTL ; en cas d'échec réseau, le
-serveur renvoie la dernière valeur connue avec un drapeau `stale`. Le flux des
+serveur renvoie la dernière valeur connue avec un drapeau `stale`. Les appels
+simultanés à une même source sont mutualisés, chaque source a un délai maximal
+de 5 secondes, et un échec n'est pas retenté pendant 5 secondes. Le flux des
 véhicules est décodé une fois puis indexé par ligne (TTL 10 s) : changer de
 ligne ne déclenche aucune requête réseau supplémentaire.
 
