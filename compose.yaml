@@ -45,7 +45,6 @@ services:
     volumes:
       - ./server.js:/app/server.js:ro
       - ./fallback_gtfs.py:/app/fallback_gtfs.py:ro
-      - ./tools:/app/tools:ro
       - ./public/index.html:/app/public/index.html:ro
       - ./public/style.css:/app/public/style.css:ro
       - ./public/app.js:/app/public/app.js:ro

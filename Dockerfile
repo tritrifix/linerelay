@@ -12,8 +12,11 @@
 #   docker build --build-arg SKIP_TRACES=1 .
 # (l'application fonctionne alors sans les polylignes des lignes)
 
-ARG NODE_IMAGE=node:20-bookworm-slim
-ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+# Images de base épinglées par empreinte : un même Dockerfile donne la même
+# image, quel que soit le jour du build. Dependabot propose les mises à jour
+# (.github/dependabot.yml).
+ARG NODE_IMAGE=node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 # --------------------------------------------------------------------------- #
 # 1. Dépendances npm                                                          #
@@ -55,9 +58,14 @@ RUN mkdir -p public \
 # -- module Python du repli GTFS-RT ----------------------------------------- #
 # Dépôt public tritrifix/scripts-divia : on ne garde que le paquet divia_api,
 # le reste du dépôt n'est pas utilisé par LineRelay.
+# FALLBACK_REF est un commit précis, et non une branche : le code Python
+# embarqué dans l'image ne change que si cette ligne change. Pour le mettre à
+# jour :  git ls-remote https://github.com/tritrifix/scripts-divia refs/heads/main
 ARG FALLBACK_REPO=https://github.com/tritrifix/scripts-divia
-ARG FALLBACK_REF=main
-RUN git clone --depth 1 --branch "$FALLBACK_REF" "$FALLBACK_REPO" /tmp/scripts-divia \
+ARG FALLBACK_REF=7d7016456a803d7e64a04c450d40a7b41e4b4482
+RUN git init -q /tmp/scripts-divia \
+ && git -C /tmp/scripts-divia fetch -q --depth 1 "$FALLBACK_REPO" "$FALLBACK_REF" \
+ && git -C /tmp/scripts-divia checkout -q FETCH_HEAD \
  && mkdir -p /build/divia-scripts \
  && cp -r /tmp/scripts-divia/divia_api /build/divia-scripts/divia_api \
  && find /build/divia-scripts -name '__pycache__' -type d -prune -exec rm -rf {} + \
@@ -80,7 +88,6 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m venv /opt/venv \
- && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
  && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements-fallback.txt \
  && rm -f /tmp/requirements-fallback.txt
 
@@ -89,7 +96,6 @@ WORKDIR /app
 COPY --from=npmdeps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY server.js fallback_gtfs.py ./
-COPY tools/ ./tools/
 COPY public/index.html public/style.css public/app.js ./public/
 COPY --from=assets /build/public/traces.json ./public/traces.json
 COPY --from=assets /build/divia-scripts/ ./divia-scripts/
