@@ -53,11 +53,17 @@ else
   log "Dépôt fallback déjà présent (./$REPO_DIR), on ne reclone pas."
 fi
 
-# Dépendances Python du repli (best-effort : l'app marche sans).
+# Dépendances Python du repli (best-effort : l'app marche sans). Elles vont
+# dans un virtualenv local (.venv) : sur Ubuntu 24.04 et Debian 12, `pip
+# install --user` est refusé (PEP 668). start.sh place .venv/bin dans le PATH,
+# ce qui permet à server.js de lancer le même python3 que celui qui a ses paquets.
 if [ -d "$REPO_DIR" ]; then
-  log "Installation des dépendances Python du repli GTFS-RT…"
-  python3 -m pip install --user --quiet -r docker/requirements-fallback.txt 2>/dev/null \
-    || echo "Avertissement : dépendances Python non installées — repli désactivé, source principale OK."
+  log "Installation des dépendances Python du repli GTFS-RT (.venv)…"
+  if python3 -m venv .venv && .venv/bin/python -m pip install --quiet -r docker/requirements-fallback.txt; then
+    echo "→ dépendances Python installées dans .venv."
+  else
+    echo "Avertissement : dépendances Python non installées — repli désactivé, source principale OK."
+  fi
 fi
 
 # ------------------------------------------------------------ configuration ---
