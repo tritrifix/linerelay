@@ -508,31 +508,120 @@ function computeHeading({ bearing, prev, cur, minDistanceM = HEADING_MIN_DISTANC
   return { heading: null, source: "inconnu" };
 }
 
+// Terminus de chaque sens : nom de l'arrêt le plus proche du dernier point de
+// la polyligne du sens (la plus détaillée si plusieurs variantes). Renvoie
+// { direction_id -> nom } ; un sens sans arrêt assez proche est omis.
+function terminusByDirection(polylines, stops, maxDistanceM = 500) {
+  const longest = {};
+  for (const pl of polylines || []) {
+    const pts = (pl && pl.points) || [];
+    if (pts.length < 2 || pl.direction == null) continue;
+    const d = String(pl.direction);
+    if (!longest[d] || pts.length > longest[d].length) longest[d] = pts;
+  }
+  const out = {};
+  for (const [d, pts] of Object.entries(longest)) {
+    const last = pts[pts.length - 1];
+    const end = { lat: Number(last[0]), lon: Number(last[1]) };
+    if (!validPos(end)) continue;
+    let best = null;
+    for (const s of stops || []) {
+      if (!validPos(s)) continue;
+      const dist = distanceMeters(end, s);
+      if (dist <= maxDistanceM && (!best || dist < best.dist)) best = { dist, name: s.name };
+    }
+    if (best && best.name) out[d] = best.name;
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Positions des véhicules (GTFS-RT, décodage natif Node)             */
 /*  Le flux est décodé une fois et indexé par route_id (TTL 10 s),     */
 /*  donc changer de ligne ne déclenche pas de nouvelle requête.        */
 /* ------------------------------------------------------------------ */
+// Indexe un flux décodé par route_id. `memory` (id -> { lat, lon, ts }) garde
+// une position de référence par véhicule d'un relevé à l'autre : elle sert à
+// estimer le cap quand le flux ne le donne pas, et à constater l'immobilité.
+// La référence n'avance que lorsque le véhicule s'est réellement déplacé, pour
+// qu'une progression lente finisse par être mesurable.
+function buildVehicleIndex(feed, memory = new Map(), now = Date.now()) {
+  const byRoute = {};
+  const stats = { total: 0, bearing: 0, estimated: 0, unknown: 0, stopped: 0, unreliableSpeed: 0 };
+  for (const e of (feed && feed.entity) || []) {
+    const v = e.vehicle;
+    if (!v || !v.trip || !v.trip.routeId || !v.position) continue;
+    const id = (v.vehicle && (v.vehicle.label || v.vehicle.id)) || e.id;
+    const cur = { lat: v.position.latitude, lon: v.position.longitude };
+    // Ce flux publie la vitesse en km/h (entiers de 0 à 65 environ), et non
+    // en m/s comme le prévoit la spécification GTFS-RT : transmise telle quelle.
+    const speed = own(v.position, "speed") ? v.position.speed : null;
+
+    let ref = id != null ? memory.get(id) : null;
+    if (ref && now - ref.ts > HEADING_MEMORY_MS) ref = null;
+    const moved = ref && validPos(cur) ? distanceMeters(ref, cur) : null;
+    if (id != null && validPos(cur) && (!ref || moved >= HEADING_MIN_DISTANCE_M)) {
+      memory.set(id, { lat: cur.lat, lon: cur.lon, ts: now });
+    }
+
+    // Un champ absent du message protobuf vaut 0 par défaut : seule sa
+    // présence réelle distingue « plein nord » de « non renseigné ».
+    const { heading, source } = computeHeading({
+      bearing: own(v.position, "bearing") ? v.position.bearing : null,
+      prev: ref,
+      cur,
+    });
+    // « 0 km/h » seul ne suffit pas (le flux l'annonce pour des véhicules qui
+    // avancent) : à l'arrêt = vitesse nulle et aucun déplacement constaté.
+    const stopped = speed === 0 && !(moved != null && moved >= HEADING_MIN_DISTANCE_M);
+    const speedReliable = speed == null ? null : speed >= 0 && speed <= SPEED_MAX_PLAUSIBLE_KMH;
+
+    stats.total++;
+    stats[source === "bearing" ? "bearing" : source === "estimé" ? "estimated" : "unknown"]++;
+    if (stopped) stats.stopped++;
+    if (speedReliable === false) stats.unreliableSpeed++;
+
+    (byRoute[v.trip.routeId] = byRoute[v.trip.routeId] || []).push({
+      id,
+      lat: cur.lat,
+      lon: cur.lon,
+      bearing: v.position.bearing || null, // champ historique, inchangé (0 y devient null)
+      speed,
+      tripId: v.trip.tripId || null,
+      // Champs ajoutés, tous optionnels pour un client existant :
+      heading, // cap en degrés [0, 360), ou null
+      headingSource: source, // "bearing" | "estimé" | "inconnu"
+      stopped,
+      speedReliable, // false : vitesse aberrante, à ne pas afficher ; null : vitesse absente
+      directionId: own(v.trip, "directionId") ? v.trip.directionId : null,
+    });
+  }
+  for (const [id, ref] of memory) if (now - ref.ts > HEADING_MEMORY_MS) memory.delete(id);
+  return { byRoute, stats };
+}
+
+const vehicleMemory = new Map(); // id véhicule -> position de référence
+let lastHeadingLog = "";
+
+// Signale dans les logs les caps estimés ou inconnus et les vitesses
+// écartées, seulement quand le décompte change (le flux est relu toutes les 10 s).
+function logHeadingStats(stats) {
+  const line =
+    stats.estimated || stats.unknown || stats.unreliableSpeed
+      ? `[cap] ${stats.total} véhicules : ${stats.bearing} cap(s) du flux, ${stats.estimated} estimé(s), ` +
+        `${stats.unknown} inconnu(s), ${stats.unreliableSpeed} vitesse(s) non fiable(s)`
+      : "";
+  if (line && line !== lastHeadingLog) console.log(line);
+  lastHeadingLog = line;
+}
+
 async function getVehicleIndex() {
   const { value, cachedAt, stale } = await cached("veh-index", 10 * 1000, async () => {
     const res = await fetchSource(VEHICLE_FEED);
     if (!res.ok) throw new Error(`flux véhicules HTTP ${res.status}`);
     const feed = GtfsRT.transit_realtime.FeedMessage.decode(Buffer.from(await res.arrayBuffer()));
-    const byRoute = {};
-    for (const e of feed.entity) {
-      const v = e.vehicle;
-      if (!v || !v.trip || !v.trip.routeId || !v.position) continue;
-      (byRoute[v.trip.routeId] = byRoute[v.trip.routeId] || []).push({
-        id: (v.vehicle && (v.vehicle.label || v.vehicle.id)) || e.id,
-        lat: v.position.latitude,
-        lon: v.position.longitude,
-        bearing: v.position.bearing || null,
-        // Ce flux publie la vitesse en km/h (entiers de 0 à 65 environ), et non
-        // en m/s comme le prévoit la spécification GTFS-RT : transmise telle quelle.
-        speed: Object.prototype.hasOwnProperty.call(v.position, "speed") ? v.position.speed : null,
-        tripId: v.trip.tripId || null,
-      });
-    }
+    const { byRoute, stats } = buildVehicleIndex(feed, vehicleMemory);
+    logHeadingStats(stats);
     return byRoute;
   });
   return { byRoute: value, cachedAt, stale: !!stale };
@@ -541,7 +630,23 @@ async function getVehicleIndex() {
 async function getVehicles(lineId) {
   const line = await getLine(lineId);
   const { byRoute, cachedAt, stale } = await getVehicleIndex();
-  return { vehicles: byRoute[line.gtfsRouteId] || [], cachedAt, stale };
+  const list = byRoute[line.gtfsRouteId] || [];
+  // Destination (« vers … ») : terminus du sens annoncé par le flux. Les arrêts
+  // viennent du cache d'une heure ; en cas d'échec, pas de destination plutôt
+  // qu'une erreur sur les positions.
+  let terminus = {};
+  if (list.some((v) => v.directionId != null)) {
+    try {
+      terminus = terminusByDirection((TRACES[line.gtfsRouteId] || {}).polylines, (await getStops(lineId)).stops);
+    } catch {
+      terminus = {};
+    }
+  }
+  const vehicles = list.map((v) => ({
+    ...v,
+    destination: v.directionId != null ? terminus[String(v.directionId)] || null : null,
+  }));
+  return { vehicles, cachedAt, stale };
 }
 
 /* ------------------------------------------------------------------ */
@@ -874,4 +979,6 @@ module.exports = {
   distanceMeters,
   bearingBetween,
   computeHeading,
+  terminusByDirection,
+  buildVehicleIndex,
 };

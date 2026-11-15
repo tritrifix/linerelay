@@ -1,14 +1,18 @@
 /**
  * Tests du cap des véhicules — `npm test` (node:test, aucune dépendance).
  *
- * Aucun appel réseau.
+ * Aucun appel réseau : le flux GTFS-RT est un objet construit à la main, ou un
+ * message encodé localement et servi par une doublure de `fetch`.
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const http = require("node:http");
 
 process.env.VELODI_FEED_URL = "http://source.invalid/velos";
 process.env.RATE_LIMIT_MAX = "1000";
 
+const divia = require("divia-api");
+const GtfsRT = require("gtfs-realtime-bindings");
 const srv = require("../server.js");
 
 // Place Darcy, Dijon. À cette latitude, 0,001° vaut environ 111 m vers le
@@ -109,4 +113,159 @@ test("computeHeading : distance trop faible ou information insuffisante, cap inc
   assert.deepEqual(srv.computeHeading(), unknown);
   // Le seuil est réglable : les mêmes 5,5 m suffisent si on l'abaisse.
   assert.equal(srv.computeHeading({ prev: DARCY, cur: north(DARCY, 0.00005), minDistanceM: 5 }).source, "estimé");
+});
+
+test("terminusByDirection : arrêt le plus proche de la fin de chaque sens", () => {
+  const stops = [
+    { name: "Gare", lat: 47.32, lon: 5.02 },
+    { name: "Milieu", lat: 47.32, lon: 5.05 },
+    { name: "Campus", lat: 47.32, lon: 5.08 },
+  ];
+  const polylines = [
+    { direction: "0", points: [[47.32, 5.02], [47.32, 5.05], [47.32, 5.0801]] },
+    { direction: "0", points: [[47.32, 5.02], [47.32, 5.05]] }, // variante courte, ignorée
+    { direction: "1", points: [[47.32, 5.08], [47.32, 5.0201]] },
+    { direction: "2", points: [[47.32, 5.08], [47.5, 5.5]] }, // aucun arrêt à proximité
+  ];
+  assert.deepEqual(srv.terminusByDirection(polylines, stops), { 0: "Campus", 1: "Gare" });
+  assert.deepEqual(srv.terminusByDirection(undefined, stops), {});
+  assert.deepEqual(srv.terminusByDirection(polylines, []), {});
+});
+
+/* ------------------------------------------------------------------ */
+/*  Index des véhicules                                                */
+/* ------------------------------------------------------------------ */
+const entity = (id, position, trip = {}) => ({
+  id: "e" + id,
+  vehicle: { vehicle: { id: String(id), label: String(id) }, trip: { routeId: "4-T9", tripId: "trip-" + id, ...trip }, position },
+});
+const at = (p, extra = {}) => ({ latitude: p.lat, longitude: p.lon, ...extra });
+
+test("buildVehicleIndex : champs historiques conservés, champs de cap ajoutés", () => {
+  const { byRoute, stats } = srv.buildVehicleIndex({
+    entity: [
+      entity(1, at(DARCY, { bearing: 251, speed: 33 }), { directionId: 1 }),
+      entity(2, at(DARCY, { bearing: 0, speed: 12 }), { directionId: 0 }),
+      entity(3, at(DARCY)),
+      { id: "sans-position", vehicle: { trip: { routeId: "4-T9" } } },
+      { id: "sans-ligne", vehicle: { position: at(DARCY) } },
+      { tripUpdate: {} },
+    ],
+  });
+  const [a, b, c] = byRoute["4-T9"];
+  assert.equal(byRoute["4-T9"].length, 3);
+  assert.deepEqual(a, {
+    id: "1", lat: DARCY.lat, lon: DARCY.lon, bearing: 251, speed: 33, tripId: "trip-1",
+    heading: 251, headingSource: "bearing", stopped: false, speedReliable: true, directionId: 1,
+  });
+  // Plein nord : l'ancien champ reste à null (contrat inchangé), le nouveau vaut 0.
+  assert.deepEqual([b.bearing, b.heading, b.headingSource, b.directionId], [null, 0, "bearing", 0]);
+  // Ni bearing ni position précédente : cap inconnu, jamais 0 par défaut.
+  assert.deepEqual([c.bearing, c.speed, c.heading, c.headingSource, c.speedReliable, c.directionId],
+    [null, null, null, "inconnu", null, null]);
+  assert.deepEqual(stats, { total: 3, bearing: 2, estimated: 0, unknown: 1, stopped: 0, unreliableSpeed: 0 });
+});
+
+test("buildVehicleIndex : sans bearing, le cap est estimé entre deux relevés", () => {
+  const memory = new Map();
+  const feed = (p) => ({ entity: [entity(7, at(p, { speed: 20 }))] });
+  const first = srv.buildVehicleIndex(feed(DARCY), memory, 0).byRoute["4-T9"][0];
+  assert.deepEqual([first.heading, first.headingSource], [null, "inconnu"]);
+  // 5,5 m plus loin : trop peu pour conclure, et la référence ne bouge pas.
+  const second = srv.buildVehicleIndex(feed(north(DARCY, 0.00005)), memory, 10000).byRoute["4-T9"][0];
+  assert.deepEqual([second.heading, second.headingSource], [null, "inconnu"]);
+  // La progression lente s'accumule depuis la référence : 22 m au total, vers le nord.
+  const third = srv.buildVehicleIndex(feed(north(DARCY, 0.0002)), memory, 20000);
+  assert.deepEqual([third.byRoute["4-T9"][0].heading, third.byRoute["4-T9"][0].headingSource], [0, "estimé"]);
+  assert.equal(third.stats.estimated, 1);
+  // Puis vers l'est.
+  const fourth = srv.buildVehicleIndex(feed(east(north(DARCY, 0.0002), 0.001)), memory, 30000).byRoute["4-T9"][0];
+  assert.deepEqual([fourth.heading, fourth.headingSource], [90, "estimé"]);
+});
+
+test("buildVehicleIndex : une position de référence trop ancienne est oubliée", () => {
+  const memory = new Map();
+  srv.buildVehicleIndex({ entity: [entity(8, at(DARCY))] }, memory, 0);
+  const late = srv.buildVehicleIndex({ entity: [entity(8, at(north(DARCY, 0.01)))] }, memory, 6 * 60 * 1000).byRoute["4-T9"][0];
+  assert.equal(late.headingSource, "inconnu", "un saut après six minutes de silence n'est pas un cap");
+  // Un véhicule disparu du flux ne reste pas en mémoire indéfiniment.
+  srv.buildVehicleIndex({ entity: [] }, memory, 20 * 60 * 1000);
+  assert.equal(memory.size, 0);
+});
+
+test("buildVehicleIndex : à l'arrêt = vitesse nulle et aucun déplacement constaté", () => {
+  const memory = new Map();
+  const feed = (p, speed) => ({ entity: [entity(9, at(p, { bearing: 80, speed }))] });
+  const stopped = (r) => r.byRoute["4-T9"][0].stopped;
+  assert.equal(stopped(srv.buildVehicleIndex(feed(DARCY, 0), memory, 0)), true, "0 km/h, premier relevé");
+  assert.equal(stopped(srv.buildVehicleIndex(feed(DARCY, 0), memory, 10000)), true, "0 km/h, immobile");
+  // Le flux annonce 0 km/h alors que le véhicule a avancé de 111 m : il roule.
+  assert.equal(stopped(srv.buildVehicleIndex(feed(north(DARCY, 0.001), 0), memory, 20000)), false);
+  assert.equal(stopped(srv.buildVehicleIndex(feed(north(DARCY, 0.001), 0), memory, 30000)), true);
+  assert.equal(stopped(srv.buildVehicleIndex(feed(north(DARCY, 0.001), 14), memory, 40000)), false, "vitesse non nulle");
+});
+
+test("buildVehicleIndex : une vitesse aberrante est signalée, pas modifiée", () => {
+  const { byRoute, stats } = srv.buildVehicleIndex({
+    entity: [entity(1, at(DARCY, { speed: 137 })), entity(2, at(DARCY, { speed: 100 })), entity(3, at(DARCY, { speed: -4 }))],
+  });
+  assert.deepEqual(byRoute["4-T9"].map((v) => [v.speed, v.speedReliable]), [[137, false], [100, true], [-4, false]]);
+  assert.equal(stats.unreliableSpeed, 2);
+});
+
+/* ------------------------------------------------------------------ */
+/*  HTTP : flux GTFS-RT encodé localement                              */
+/* ------------------------------------------------------------------ */
+test("GET /vehicles : ancienne structure intacte, cap et source ajoutés", async (t) => {
+  const real = { listLines: divia.listLines, listStops: divia.listStops, fetch: global.fetch };
+  divia.listLines = async (mode) => (mode === "tramway" ? [{ id: "line:TEST:T9", code: "T9", name: "Gare <> Campus" }] : []);
+  divia.listStops = async () => [{ id: "stop_area:TEST:SA:4-29", name: "Génois", coord: { lat: 47.33, lon: 5.03 } }];
+  const FeedMessage = GtfsRT.transit_realtime.FeedMessage;
+  const bytes = FeedMessage.encode(
+    FeedMessage.create({
+      header: { gtfsRealtimeVersion: "2.0", timestamp: 1 },
+      entity: [
+        entity(1001, at(DARCY, { bearing: 251, speed: 33 }), { directionId: 1 }),
+        entity(1002, at(DARCY, { speed: 140 })),
+      ],
+    })
+  ).finish();
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  });
+  srv.store.delete("veh-index");
+  srv.failures.delete("veh-index");
+
+  const server = srv.app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => {
+    server.close();
+    Object.assign(divia, { listLines: real.listLines, listStops: real.listStops });
+    global.fetch = real.fetch;
+  });
+
+  const body = await new Promise((resolve, reject) => {
+    http
+      .get({ host: "127.0.0.1", port: server.address().port, path: `/api/lines/${encodeURIComponent("line:TEST:T9")}/vehicles` }, (res) => {
+        let raw = "";
+        res.on("data", (d) => (raw += d));
+        res.on("end", () => resolve({ status: res.statusCode, json: JSON.parse(raw) }));
+      })
+      .on("error", reject);
+  });
+
+  assert.equal(body.status, 200);
+  assert.deepEqual(Object.keys(body.json), ["vehicles", "cachedAt", "stale", "updatedAt"]);
+  const [a, b] = body.json.vehicles;
+  // Les six champs d'origine, dans le même ordre et avec les mêmes valeurs.
+  assert.deepEqual(Object.keys(a).slice(0, 6), ["id", "lat", "lon", "bearing", "speed", "tripId"]);
+  assert.deepEqual([a.id, a.bearing, a.speed, a.tripId], ["1001", 251, 33, "trip-1001"]);
+  assert.ok(Math.abs(a.lat - DARCY.lat) < 1e-4 && Math.abs(a.lon - DARCY.lon) < 1e-4);
+  // Champs ajoutés.
+  assert.deepEqual([a.heading, a.headingSource, a.stopped, a.speedReliable, a.directionId], [251, "bearing", false, true, 1]);
+  assert.equal(a.destination, null, "pas de tracé dans les tests : destination absente, sans erreur");
+  // Bearing absent du message protobuf : inconnu, et non « nord ».
+  assert.deepEqual([b.bearing, b.heading, b.headingSource, b.speedReliable, b.destination], [null, null, "inconnu", false, null]);
 });
