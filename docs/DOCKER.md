@@ -6,14 +6,15 @@ construction d'une image, puis déploiement de cette même image en production.
 ## Vue d'ensemble
 
 ```
-  Ta machine (WebStorm + Claude Code)        GitHub                 Serveur de prod
+  Ta machine de développement                GitHub                 Serveur de prod
   ───────────────────────────────────        ──────                 ───────────────
   make dev                                                        
    └─ compose.yaml, code monté,                                   
       rechargement à chaud                                        
                                                                    
   git push ──────────────────────────► Actions                     
-                                        └─ build + publication     
+                                        └─ build, vérification,    
+                                           publication             
                                            ghcr.io/tritrifix/      
                                            linerelay:<tag> ───────► make deploy
                                                                      └─ compose.prod.yaml
@@ -22,6 +23,21 @@ construction d'une image, puis déploiement de cette même image en production.
 
 L'image déployée en production est **exactement** celle qui a été construite et
 testée : rien n'est recompilé sur le serveur.
+
+Les deux modes utilisent le même service Compose, `app`, et le même projet,
+`linerelay` ; seul le fichier change.
+
+| | Développement | Production |
+|---|---|---|
+| Fichier Compose | `compose.yaml` (pris par défaut) | `compose.prod.yaml` (à passer avec `-f`) |
+| Image | construite sur place, `linerelay:dev` | tirée de GHCR, `ghcr.io/tritrifix/linerelay:latest` par défaut |
+| Code | cinq fichiers montés depuis l'hôte, `node --watch` | figé dans l'image |
+| `NODE_ENV` | `development` | `production` |
+| Système de fichiers | inscriptible | lecture seule, `/tmp` en mémoire (16 Mo) |
+| Privilèges | ceux par défaut de Docker | `cap_drop: ALL`, `no-new-privileges` |
+| Mémoire | non limitée | 512 Mo |
+| Logs | sortie standard | `json-file`, 3 fichiers de 10 Mo |
+| Cache navigateur des fichiers statiques | aucun | 5 minutes |
 
 ## Ce que contient l'image
 
@@ -62,7 +78,9 @@ Détails utiles :
   changent. En local : `DRY_RUN=1 node docker/prune-node-modules.mjs .` montre
   ce qui serait supprimé sans rien toucher.
 - En production le conteneur tourne en **lecture seule**, sans capacité Linux
-  (`cap_drop: ALL`), `no-new-privileges`, avec `/tmp` en mémoire.
+  (`cap_drop: ALL`), `no-new-privileges`, avec `/tmp` en mémoire et une limite
+  de 512 Mo de mémoire. L'application n'écrit rien sur disque : son cache et la
+  mémoire des positions de véhicules vivent dans le processus.
 
 ## Développement local
 
@@ -85,7 +103,7 @@ de Windows par défaut. Chaque cible a un équivalent portable dans
 | `make dev` | `npm run docker:dev` | `docker compose up --build` |
 | `make down` | `npm run docker:down` | `docker compose down` |
 | `make logs` | `npm run docker:logs` | `docker compose logs -f` |
-| `make build` | `npm run docker:build` | `docker build -t linerelay:dev .` |
+| `make build` | `npm run docker:build` | `docker build -t linerelay:dev .` (avec `make`, l'image s'appelle `ghcr.io/tritrifix/linerelay:dev`) |
 | `make deploy` | `npm run docker:deploy` | `docker compose -f compose.prod.yaml pull && … up -d` |
 
 La carte répond sur <http://localhost:3000>. Si ce port est déjà pris :
@@ -101,16 +119,19 @@ dissocier les deux côtés (voir *Variables d'environnement*).
 
 Le code est monté depuis l'hôte **fichier par fichier** (`server.js`,
 `public/app.js`, `public/index.html`, `public/style.css`,
-`fallback_gtfs.py`) et lancé avec `node --watch` : sauvegarder dans WebStorm
+`fallback_gtfs.py`) et lancé avec `node --watch` : sauvegarder dans ton éditeur
 redémarre le serveur. Les fichiers sont montés en lecture seule — le conteneur
 ne peut pas modifier tes sources.
 
-> **Après un changement de branche, recrée le conteneur.** Un montage fichier
+> **Après un changement de branche, rétablis les montages.** Un montage fichier
 > par fichier suit le fichier d'origine, pas son nom : quand Git (`git switch`,
-> `git merge`, `git pull`) ou un éditeur réglé pour écrire par remplacement
-> (*safe write* de WebStorm) remplace le fichier, le conteneur garde l'ancien
-> et ne voit plus les modifications. `docker compose up -d --force-recreate`
-> (ou `make up`) rétablit les montages.
+> `git merge`, `git pull`) ou un outil qui écrit par remplacement (*safe write*
+> de WebStorm, assistant de code) remplace le fichier, le conteneur garde
+> l'ancien. Les modifications ne sont plus vues, et le serveur peut s'arrêter
+> sur `ENOENT: no such file or directory, open '/app/server.js'`.
+> `docker compose restart app` ou `docker compose up -d --force-recreate`
+> rétablit les montages. `make up` ne suffit pas : il ne recrée pas un
+> conteneur dont la configuration n'a pas changé.
 
 > Le dossier `public/` n'est volontairement **pas** monté en entier : cela
 > masquerait le `public/traces.json` généré dans l'image, et la carte perdrait
@@ -141,36 +162,46 @@ make smoke     # construit l'image de prod et vérifie /api/health
 
 ### Par GitHub Actions (recommandé)
 
-`.github/workflows/docker-publish.yml` construit l'image, la publie sur GHCR et
-vérifie qu'elle démarre. Aucun secret à configurer : le workflow utilise le
-`GITHUB_TOKEN` fourni par Actions, avec la permission `packages: write`.
+`.github/workflows/docker-publish.yml` construit l'image, vérifie qu'elle
+démarre sous les contraintes de la production (lecture seule, sans capacité
+Linux, sonde `/api/health`), puis la publie sur GHCR. Aucun secret à
+configurer : le workflow utilise le `GITHUB_TOKEN` fourni par Actions, avec la
+permission `packages: write`.
 
 | Déclencheur | Tags publiés |
 |---|---|
 | push sur `main` | `:main`, `:sha-<court>` |
-| tag `v1.2.3` | `:v1.2.3`, `:1.2`, `:1`, `:latest` |
-| pull request | build de vérification, **sans** publication |
+| tag Git `v1.2.3` | `:1.2.3`, `:1.2`, `:1`, `:latest`, `:sha-<court>` |
+| pull request vers `main` | build et vérification, **sans** publication |
 
-Pour sortir une version :
+Les tags d'image n'ont **pas** le préfixe `v` du tag Git : le tag Git `v1.1.0`
+publie l'image `:1.1.0`. Un push sur `main` ne déplace pas `:latest` ; seul un
+tag de version le fait.
+
+Pour sortir une version, aligne d'abord `version` dans `package.json`
+(`npm version <X.Y.Z> --no-git-tag-version`, dans une pull request), complète
+`CHANGELOG.md`, puis, une fois le tout fusionné dans `main` :
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v<X.Y.Z> && git push origin v<X.Y.Z>     # par exemple v1.1.0
 ```
 
-> Le dépôt `tritrifix/linerelay` est **public**. Le paquet GHCR, lui, garde
-> la visibilité qu'il avait à sa création : vérifie-la dans l'onglet
-> *Packages* du dépôt. S'il est privé, le serveur doit s'authentifier pour le
-> tirer (étapes ci-dessous) ; s'il est public, `docker login` est inutile.
+> Le dépôt `tritrifix/linerelay` et son paquet GHCR sont **publics** : tirer
+> l'image ne demande aucune authentification. Seule la publication à la main
+> (ci-dessous) demande un `docker login`.
 
 ### À la main depuis ta machine
 
 ```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u tritrifix --password-stdin
-TAG=v1.0.0 make push
+echo "<TON_TOKEN>" | docker login ghcr.io -u <TON_COMPTE_GITHUB> --password-stdin
+TAG=<X.Y.Z> make push                            # par exemple TAG=1.1.0
 ```
 
-`GHCR_TOKEN` est un *personal access token* (classique) avec la portée
-`write:packages`. Ne l'écris jamais dans un fichier du dépôt.
+`<TON_TOKEN>` est un *personal access token* (classique) avec la portée
+`write:packages`. Ne l'écris jamais dans un fichier du dépôt ni dans
+l'historique du shell : préfère une variable d'environnement ou
+`docker login` en mode interactif. `make push` publie le seul tag demandé, sans
+la vérification de démarrage ni les tags `:1.1`, `:1` et `:latest` du workflow.
 
 ## Déployer en production
 
@@ -189,31 +220,34 @@ TAG=v1.0.0 make push
    sudo usermod -aG docker "$USER"   # puis se reconnecter
    ```
 
-2. **Récupérer le dépôt et s'authentifier sur GHCR** :
+2. **Récupérer le dépôt** (seuls `compose.prod.yaml` et, si tu en as un, ton
+   `.env` servent au déploiement) :
 
    ```bash
-   git clone git@github-linerelay:tritrifix/linerelay.git ~/linerelay-docker
-   cd ~/linerelay-docker
-   echo "$GHCR_TOKEN" | docker login ghcr.io -u tritrifix --password-stdin
+   git clone https://github.com/tritrifix/linerelay.git <DOSSIER_DEPLOIEMENT>
+   cd <DOSSIER_DEPLOIEMENT>
    ```
 
-   Sur le serveur, un token en lecture seule (`read:packages`) suffit.
+   Le dépôt et l'image étant publics, ni clé SSH ni `docker login` ne sont
+   nécessaires.
 
-3. **Libérer le port 3000**, occupé par l'installation actuelle hors Docker :
+3. **Libérer le port 3000** s'il est occupé par une ancienne installation hors
+   Docker :
 
    ```bash
-   cd ~/linerelay && ./start.sh stop
+   cd <ANCIENNE_INSTALLATION> && ./start.sh stop
    crontab -l | grep -v 'start.sh' | crontab -   # retire le démarrage au boot
    ```
 
-   Vérifie l'ancienne entrée avant de la supprimer : elle peut encore pointer
-   vers `/home/user/divia-ligne5-map/start.sh`. Tu peux aussi garder les deux
-   en parallèle le temps de la bascule, avec `PORT=3001` pour le conteneur.
+   Relis l'entrée `crontab -l` avant de la supprimer : elle pointe vers le
+   dossier de l'ancienne installation, qui peut porter un autre nom. Tu peux
+   aussi garder les deux en parallèle le temps de la bascule, avec `PORT=3001`
+   pour le conteneur.
 
 ### À chaque déploiement
 
 ```bash
-cd ~/linerelay-docker
+cd <DOSSIER_DEPLOIEMENT>
 git pull
 docker compose -f compose.prod.yaml pull
 docker compose -f compose.prod.yaml up -d
@@ -230,19 +264,22 @@ nécessaire.
 Déployer une version précise, et revenir en arrière si besoin :
 
 ```bash
-export LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:v1.0.0
+export LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:1.1.0
 docker compose -f compose.prod.yaml up -d
 ```
 
-Pour revenir en arrière, la même commande avec le tag précédent.
+Pour revenir en arrière, la même commande avec le tag précédent
+(`:1.0.0`). Les versions publiées sont listées dans
+[CHANGELOG.md](../CHANGELOG.md).
 
 > **Architecture de l'image.** Le workflow publie une image `linux/amd64`, qui
 > correspond au serveur. Si tu développes sur un Mac Apple Silicon, tes builds
 > locaux seront en `arm64` : c'est transparent en local, mais l'image testée
 > chez toi n'est alors pas exactement celle déployée. Pour une image
-> multi-architecture, ajoute `platforms: linux/amd64,linux/arm64` à l'étape
-> *Construire et publier* du workflow, avec `docker/setup-qemu-action@v3` juste
-> avant Buildx (le build devient nettement plus long).
+> multi-architecture, ajoute `platforms: linux/amd64,linux/arm64` aux étapes
+> *Construire* et *Publier* du workflow, avec l'action
+> `docker/setup-qemu-action` juste avant Buildx, épinglée par SHA comme les
+> autres (le build devient nettement plus long).
 
 ### Surveiller
 
