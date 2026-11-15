@@ -11,7 +11,7 @@
 # Épingler une version précise plutôt que `latest` pour un déploiement
 # reproductible (et un retour arrière immédiat). Les tags d'image n'ont pas le
 # préfixe « v » des tags Git :
-#   LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:1.1.0 \
+#   LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:1.1.1 \
 #     docker compose -f compose.prod.yaml up -d
 #
 # Port : PORT (dans .env sur le serveur) change le port d'écoute ET le port
