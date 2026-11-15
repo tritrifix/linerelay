@@ -55,24 +55,33 @@ jobs:
       # Le build télécharge le GTFS statique pour générer les tracés : le
       # runner a accès au réseau, mais la source peut être momentanément
       # indisponible. En cas d'échec, relancer le job.
-      - name: Construire et publier
+      #
+      # Trois temps : construire et charger l'image dans le Docker du runner,
+      # la vérifier, puis seulement la publier. La vérification porte ainsi
+      # sur chaque pull request, et rien de non vérifié n'atteint le registre.
+      - name: Construire
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          load: true
+          push: false
+          tags: linerelay:ci
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Vérifier que l'image démarre
-        if: github.event_name != 'pull_request'
+      # Mêmes contraintes que compose.prod.yaml : système de fichiers en
+      # lecture seule, aucune capacité Linux, pas d'élévation de privilèges.
+      - name: Vérifier que l'image démarre sous les contraintes de production
         run: |
-          IMAGE="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
-          docker run -d --name linerelay-check -p 3000:3000 "$IMAGE"
+          docker run -d --name linerelay-check \
+            --read-only --tmpfs /tmp:size=16m \
+            --cap-drop ALL --security-opt no-new-privileges \
+            -p 3000:3000 linerelay:ci
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:3000/api/health >/dev/null; then
               echo "Sonde de santé OK"
+              docker logs linerelay-check
               docker rm -f linerelay-check
               exit 0
             fi
@@ -82,3 +91,14 @@ jobs:
           docker logs linerelay-check >&2
           docker rm -f linerelay-check
           exit 1
+
+      # Reprend le cache du build ci-dessus : aucune recompilation.
+      - name: Publier
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
