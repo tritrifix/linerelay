@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 18 : version minimale déclarée dans package.json ; 20 : celle de l'image.
-        node: [18, 20]
+        # 22 : version minimale déclarée dans package.json ; 24 et 26 : LTS actives (26 : image Docker).
+        node: [22, 24, 26]
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

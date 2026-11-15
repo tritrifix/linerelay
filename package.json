@@ -16,7 +16,7 @@
     "docker:deploy": "docker compose -f compose.prod.yaml pull && docker compose -f compose.prod.yaml up -d"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "keywords": ["divia", "dijon", "gtfs-rt", "navitia", "leaflet", "bus", "temps-reel"],
   "license": "ISC",

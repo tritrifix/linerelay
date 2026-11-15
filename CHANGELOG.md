@@ -7,6 +7,16 @@ version le [versionnage sémantique](https://semver.org/lang/fr/).
 Un tag Git `vX.Y.Z` publie l'image `ghcr.io/tritrifix/linerelay` sous les tags
 `X.Y.Z`, `X.Y`, `X` et `latest` (voir [docs/DOCKER.md](docs/DOCKER.md)).
 
+## [Non publié]
+
+### Modifié
+
+- Passage à Node.js 26 (LTS « Lithium ») : image Docker `node:26-bookworm-slim`
+  (épinglée par empreinte), `install.sh` (NodeSource 26.x), documentation.
+  Node 20 est en fin de support.
+- Version minimale de Node portée de 18 à 22 (`engines`). La CI teste
+  désormais Node 22, 24 et 26.
+
 ## [1.1.1] - 2026-11-15
 
 Version de maintenance : aucun changement de l'application ni de son API.

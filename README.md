@@ -63,7 +63,7 @@ d'un jeu de données open data. Sans lui, l'application fonctionne, mais sans le
 polylignes des lignes.
 
 Un script `install.sh` automatise une installation complète sur une Ubuntu
-fraîche (paquets système via `apt` et `sudo`, Node 20 LTS, dépendances Python,
+fraîche (paquets système via `apt` et `sudo`, Node 26 LTS, dépendances Python,
 tâche `cron @reboot`, démarrage). Il modifie le système : à utiliser en
 connaissance de cause.
 
@@ -152,7 +152,7 @@ make test        # les deux
 
 Les sources externes sont remplacées par des doublures : la suite tourne hors
 ligne, en moins d'une seconde. Elle est lancée par GitHub Actions à chaque
-push sur `main` et à chaque pull request vers `main`, sous Node 18 et Node 20.
+push sur `main` et à chaque pull request vers `main`, sous Node 22, 24 et 26.
 
 ## API HTTP
 
