@@ -25,7 +25,7 @@ const GtfsRT = require("gtfs-realtime-bindings");
 
 /**
  * Charge le fichier `.env` du projet s'il existe, sans dépendance externe
- * (Node 18 ne connaît pas encore `--env-file`). Les variables déjà présentes
+ * (les anciennes versions de Node ne connaissent pas `--env-file`). Les variables déjà présentes
  * dans l'environnement restent prioritaires : `PORT=8080 npm start`, Docker
  * Compose ou systemd gagnent toujours sur le fichier.
  *

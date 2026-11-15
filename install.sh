@@ -3,7 +3,7 @@
 # install.sh — Installation « from scratch » de LineRelay sur une Ubuntu propre.
 #
 #   1. Met à jour les paquets système
-#   2. Installe Node.js 20 LTS (NodeSource) + npm
+#   2. Installe Node.js 26 LTS (NodeSource) + npm
 #   3. Installe Python 3 + pip (pour le repli GTFS-RT)
 #   4. Clone le dépôt de scripts GTFS-RT dans ./divia-scripts/
 #   5. Installe les dépendances npm + génère les tracés des lignes
@@ -34,8 +34,8 @@ if [ "${SKIP_APT:-0}" != "1" ]; then
   sudo apt-get install -y curl git python3 python3-pip python3-venv unzip ca-certificates
 
   if ! command -v node >/dev/null 2>&1; then
-    log "Installation de Node.js 20 LTS via NodeSource…"
-    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    log "Installation de Node.js 26 LTS via NodeSource…"
+    curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -
     sudo apt-get install -y nodejs
   fi
 fi

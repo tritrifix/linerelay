@@ -46,9 +46,9 @@ cache, ni dépendances de développement :
 
 | Étage | Base | Rôle |
 |---|---|---|
-| `npmdeps` | `node:20-bookworm-slim` | `npm ci --omit=dev`, puis élagage de `node_modules` (voir ci-dessous) |
+| `npmdeps` | `node:26-bookworm-slim` | `npm ci --omit=dev`, puis élagage de `node_modules` (voir ci-dessous) |
 | `assets` | `python:3.12-slim-bookworm` | télécharge le GTFS statique et génère `public/traces.json` ; récupère le paquet `divia_api` du dépôt public `tritrifix/scripts-divia` pour le repli horaires |
-| `runtime` | `node:20-bookworm-slim` | Node + un virtualenv Python isolé, l'application, utilisateur non privilégié `node` (uid 1000) |
+| `runtime` | `node:26-bookworm-slim` | Node + un virtualenv Python isolé, l'application, utilisateur non privilégié `node` (uid 1000) |
 
 Détails utiles :
 
