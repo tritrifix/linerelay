@@ -45,6 +45,11 @@ Détails utiles :
   `/opt/venv` (jamais le Python système, cf. PEP 668) et le module `divia_api`
   est copié dans `/app/divia-scripts/`. Seul ce paquet est repris du dépôt
   amont, pas le reste de ses scripts.
+- **Build reproductible.** Les images de base sont épinglées par empreinte
+  (`@sha256:…`), le dépôt du repli par commit (`FALLBACK_REF`), les paquets
+  Python par version exacte, et les actions GitHub par SHA. Dependabot
+  (`.github/dependabot.yml`) propose les mises à jour chaque semaine ; le
+  commit du dépôt de repli se met à jour à la main (voir le `Dockerfile`).
 - **Sonde de santé intégrée** : `HEALTHCHECK` interroge `/api/health` avec
   Node, sans `curl` ni outil supplémentaire.
 - **`node_modules` est élagué** par `docker/prune-node-modules.mjs` :
@@ -95,7 +100,7 @@ Compose, `make` et le serveur Node le lisent tous. `HOST_PORT` ne sert qu'à
 dissocier les deux côtés (voir *Variables d'environnement*).
 
 Le code est monté depuis l'hôte **fichier par fichier** (`server.js`,
-`public/app.js`, `public/index.html`, `public/style.css`, `tools/`,
+`public/app.js`, `public/index.html`, `public/style.css`,
 `fallback_gtfs.py`) et lancé avec `node --watch` : sauvegarder dans WebStorm
 redémarre le serveur. Les fichiers sont montés en lecture seule — le conteneur
 ne peut pas modifier tes sources.

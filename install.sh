@@ -56,7 +56,7 @@ fi
 # Dépendances Python du repli (best-effort : l'app marche sans).
 if [ -d "$REPO_DIR" ]; then
   log "Installation des dépendances Python du repli GTFS-RT…"
-  python3 -m pip install --user --quiet requests gtfs-realtime-bindings protobuf 2>/dev/null \
+  python3 -m pip install --user --quiet -r docker/requirements-fallback.txt 2>/dev/null \
     || echo "Avertissement : dépendances Python non installées — repli désactivé, source principale OK."
 fi
 

@@ -1,0 +1,26 @@
+# Mises à jour proposées chaque semaine, une pull request par dépendance.
+# Les workflows « Tests » et « Publier l'image Docker » les vérifient.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Images de base du Dockerfile (empreintes @sha256).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Paquets Python du repli horaires.
+  - package-ecosystem: pip
+    directory: /docker
+    schedule:
+      interval: weekly
+
+  # Actions GitHub, épinglées par SHA.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
