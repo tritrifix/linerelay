@@ -6,7 +6,7 @@
 #
 # Versions exactes, dépendances transitives comprises, pour un build
 # reproductible. Dependabot propose les mises à jour.
-requests==2.32.3
+requests==2.34.2
 gtfs-realtime-bindings==1.0.0
 protobuf==5.29.6
 certifi==2026.10.23
