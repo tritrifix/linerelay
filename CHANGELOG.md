@@ -7,7 +7,7 @@ version le [versionnage sémantique](https://semver.org/lang/fr/).
 Un tag Git `vX.Y.Z` publie l'image `ghcr.io/tritrifix/linerelay` sous les tags
 `X.Y.Z`, `X.Y`, `X` et `latest` (voir [docs/DOCKER.md](docs/DOCKER.md)).
 
-## [Non publié]
+## [1.1.2] - 2026-11-15
 
 ### Modifié
 
@@ -16,6 +16,12 @@ Un tag Git `vX.Y.Z` publie l'image `ghcr.io/tritrifix/linerelay` sous les tags
   Node 20 est en fin de support.
 - Version minimale de Node portée de 18 à 22 (`engines`). La CI teste
   désormais Node 22, 24 et 26.
+
+### Corrigé
+
+- `install.sh` : les dépendances Python du repli GTFS-RT s'installent dans un
+  virtualenv `.venv` (Ubuntu 24.04 et Debian 12 refusent `pip install --user`) ;
+  `start.sh` place `.venv/bin` en tête du `PATH`.
 
 ## [1.1.1] - 2026-11-15
 
