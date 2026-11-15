@@ -293,6 +293,71 @@ body {
   font-size: 13px;
 }
 
+/* Véhicule + flèche de sens de marche. Le conteneur fait 44 px (cible tactile)
+   et porte la flèche sur son pourtour ; le marqueur de ligne reste au centre,
+   au-dessus, et n'est jamais recouvert. La flèche est foncée à liseré blanc :
+   lisible sur le fond de carte clair comme sur un tracé de couleur. */
+.veh {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+.veh .bus-marker {
+  position: relative;
+  z-index: 1;
+}
+.veh-dir {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+}
+.veh-dir[hidden] {
+  display: none;
+}
+.veh-dir svg,
+.lg-dir svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.veh-dir path,
+.lg-dir path {
+  fill: #1c2230;
+  stroke: #fff;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+/* Cap estimé : forme différente (creuse, contour pointillé), pas seulement une couleur. */
+.veh-dir.est path,
+.lg-dir.est path {
+  fill: #fff;
+  stroke: #1c2230;
+  stroke-width: 1.5;
+  stroke-dasharray: 2.5 1.5;
+  paint-order: normal;
+}
+.lg-dir {
+  width: 18px;
+  height: 14px;
+}
+.lg-sub {
+  color: #5a6270;
+  font-size: 12px;
+}
+.veh-dest {
+  font-weight: 700;
+}
+.veh-note {
+  color: #5a6270;
+  font-size: 12px;
+}
+
 /* Marqueur station DiviaVélodi (pastille = nb de vélos dispo) */
 .velodi-marker {
   width: 26px;

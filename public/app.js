@@ -30,6 +30,7 @@
 
   const stopMarkers = new Map(); // stopId -> { marker, name }
   const velodiMarkers = new Map(); // stationId -> { marker }
+  const vehicleMarkers = new Map(); // id véhicule -> { marker, el, dirEl, sig }
   const lineMeta = new Map(); // lineId -> { color, text_color } (métadonnées officielles)
   let openStopId = null;
   let currentLineId = null;
@@ -235,6 +236,7 @@
     velodiLayer.clearLayers();
     stopMarkers.clear();
     velodiMarkers.clear();
+    vehicleMarkers.clear();
 
     // Catégorie DiviaVélodi : affichage des stations vélo, pas d'une ligne.
     if (lineId === VELODI_VALUE) {
@@ -400,6 +402,114 @@
     }
   }
 
+  /* ------------------------ véhicules : direction ----------------------- */
+  // Flèche de sens de marche, dessinée pointe vers le haut (nord) autour du
+  // marqueur, puis tournée du cap du véhicule. Pleine : cap donné par le flux ;
+  // creuse et en pointillé : cap estimé d'après deux positions successives.
+  const DIR_ARROW =
+    '<svg viewBox="0 0 44 44" aria-hidden="true" focusable="false"><path d="M22 0.8 30.5 10.5 22 7.6 13.5 10.5Z"/></svg>';
+  const CARDINALS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
+  const cardinal = (deg) => CARDINALS[Math.round(deg / 45) % 8];
+
+  // Ce qu'il faut afficher pour un véhicule : flèche (ou non), texte de la
+  // popup et intitulé accessible. La direction est toujours dite en toutes
+  // lettres, la flèche n'étant qu'un rappel visuel.
+  function vehicleView(v) {
+    // Serveur antérieur (sans `headingSource`) : on se rabat sur `bearing`.
+    const heading =
+      typeof v.heading === "number" ? v.heading : v.headingSource === undefined && typeof v.bearing === "number" ? v.bearing : null;
+    const estimated = v.headingSource === "estimé";
+    const stopped = v.stopped === true;
+    const arrow = heading != null && !stopped; // à l'arrêt ou cap inconnu : pas de flèche trompeuse
+    const name = "Véhicule " + (v.id || "");
+    const dest = v.destination ? "vers " + v.destination : "";
+
+    let sense;
+    if (stopped) sense = "À l'arrêt";
+    else if (heading == null) sense = "Sens de marche inconnu";
+    else sense = (estimated ? "Cap estimé : " : "Cap : ") + cardinal(heading) + " (" + Math.round(heading) + "°)";
+
+    let speed = "";
+    if (!stopped) {
+      if (v.speedReliable === false) speed = "Vitesse indisponible";
+      else if (v.speed != null) speed = Math.round(v.speed) + " km/h"; // le flux publie des km/h
+      else speed = "En circulation";
+    }
+
+    const html =
+      '<div class="popup-title">' + escapeHtml(name) + "</div>" +
+      (dest ? '<div class="veh-dest">→ ' + escapeHtml(dest) + "</div>" : "") +
+      '<div class="veh-info">' + sense + "</div>" +
+      (estimated && arrow ? '<div class="veh-note">Estimation d\'après ses deux dernières positions.</div>' : "") +
+      (speed ? '<div class="veh-info">' + speed + "</div>" : "");
+    const label = [name, dest, arrow ? (estimated ? "cap estimé " : "cap ") + cardinal(heading) : stopped ? "à l'arrêt" : ""]
+      .filter(Boolean)
+      .join(", ");
+    return { arrow, estimated, rotation: arrow ? Math.round(heading) : 0, html, label };
+  }
+
+  // Applique l'état d'un véhicule à son marqueur. Le DOM n'est touché que si
+  // quelque chose a changé ; la rotation passe par le CSSOM (la politique de
+  // contenu de la page interdit les attributs style).
+  function applyVehicle(entry, v) {
+    entry.marker.setLatLng([v.lat, v.lon]);
+    const view = vehicleView(v);
+    const sig = view.arrow + "|" + view.estimated + "|" + view.rotation + "|" + view.label + "|" + view.html;
+    if (sig === entry.sig) return;
+    entry.sig = sig;
+    if (entry.dirEl) {
+      entry.dirEl.hidden = !view.arrow;
+      entry.dirEl.classList.toggle("est", view.estimated);
+      entry.dirEl.style.transform = "rotate(" + view.rotation + "deg)";
+    }
+    if (entry.el) {
+      entry.el.title = view.label;
+      entry.el.setAttribute("aria-label", view.label);
+    }
+    entry.marker.setPopupContent(view.html);
+  }
+
+  function createVehicle() {
+    const marker = L.marker([0, 0], {
+      icon: L.divIcon({
+        className: "",
+        html: '<div class="veh"><span class="veh-dir" hidden>' + DIR_ARROW + '</span><div class="bus-marker">🚌</div></div>',
+        iconSize: [44, 44],
+        iconAnchor: [22, 22],
+        popupAnchor: [0, -10],
+      }),
+      zIndexOffset: 1000,
+    });
+    marker.bindPopup("", { minWidth: 180 });
+    return { marker, el: null, dirEl: null, sig: null };
+  }
+
+  // Met à jour les marqueurs existants, ajoute les véhicules apparus et retire
+  // ceux qui ont quitté la ligne : aucun marqueur n'est recréé à chaque
+  // rafraîchissement, et une popup ouverte le reste.
+  function renderVehicles(vehicles) {
+    const seen = new Set();
+    vehicles.forEach((v, i) => {
+      let key = v.id != null && v.id !== "" ? String(v.id) : "";
+      if (!key || seen.has(key)) key = "sans-id-" + i;
+      seen.add(key);
+      let entry = vehicleMarkers.get(key);
+      if (!entry) {
+        entry = createVehicle();
+        entry.marker.setLatLng([v.lat, v.lon]).addTo(busLayer);
+        entry.el = entry.marker.getElement() || null;
+        entry.dirEl = entry.el ? entry.el.querySelector(".veh-dir") : null;
+        vehicleMarkers.set(key, entry);
+      }
+      applyVehicle(entry, v);
+    });
+    for (const [key, entry] of vehicleMarkers) {
+      if (seen.has(key)) continue;
+      busLayer.removeLayer(entry.marker);
+      vehicleMarkers.delete(key);
+    }
+  }
+
   /* --------------------------- véhicules (MàJ) -------------------------- */
   async function tick() {
     if (velodiActive) return tickVelodi(false);
@@ -408,19 +518,7 @@
     try {
       const data = await api(lineUrl("/vehicles"));
       if (lineAtStart !== currentLineId) return; // la ligne a changé pendant l'appel
-      busLayer.clearLayers();
-      for (const v of data.vehicles || []) {
-        L.marker([v.lat, v.lon], {
-          icon: L.divIcon({ className: "", html: '<div class="bus-marker">🚌</div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
-          title: "Véhicule " + (v.id || ""),
-          zIndexOffset: 1000,
-        })
-          .bindPopup(
-            '<div class="popup-title">Véhicule ' + escapeHtml(v.id || "") + "</div>" +
-              (v.speed != null ? Math.round(v.speed) + " km/h" : "en circulation") // le flux publie des km/h
-          )
-          .addTo(busLayer);
-      }
+      renderVehicles(data.vehicles || []);
       if (openStopId) {
         const entry = stopMarkers.get(openStopId);
         if (entry) refreshPopup(openStopId, entry.name);
