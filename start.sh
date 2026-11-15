@@ -23,6 +23,8 @@ for d in "${HOME:-$PWD}"/.local/node-*/bin /usr/local/bin /usr/bin; do
     case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac
   fi
 done
+# Virtualenv Python du repli (créé par install.sh) : son python3 passe en premier.
+if [ -d "$PWD/.venv/bin" ]; then PATH="$PWD/.venv/bin:$PATH"; fi
 export PATH
 
 # PORT : l'environnement d'abord, puis le .env du projet (que server.js lit
