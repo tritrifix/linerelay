@@ -87,7 +87,96 @@ const VELODI_FEED = VELODI_BASE
   : null;
 const GTFS_LINE_TOTEM = { L5: "87" }; // ids TOTEM connus pour le fallback Python
 
+// Garde-fous (cf. .env.example). Un entier positif est attendu ; toute autre
+// valeur ramène au défaut plutôt que de désactiver la protection par erreur.
+function intEnv(name, fallback) {
+  const n = Number.parseInt(process.env[name], 10);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+const RATE_LIMIT_MAX = intEnv("RATE_LIMIT_MAX", 120); // requêtes /api par minute et par adresse
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const CACHE_MAX_ENTRIES = intEnv("CACHE_MAX_ENTRIES", 2000);
+
+/** Erreur portant un statut HTTP (404 pour une ressource inconnue, etc.). */
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 const app = express();
+app.disable("x-powered-by");
+// Derrière un reverse proxy, TRUST_PROXY=1 fait lire l'adresse du client dans
+// X-Forwarded-For ; sans cela la limite de débit s'appliquerait au proxy.
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set("trust proxy", Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
+}
+
+/* ------------------------------------------------------------------ */
+/*  En-têtes de sécurité                                               */
+/* ------------------------------------------------------------------ */
+// La page ne charge que ses propres fichiers, Leaflet (unpkg, avec SRI) et
+// les tuiles OpenStreetMap : la politique de contenu n'autorise rien d'autre.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' https://unpkg.com",
+  "style-src 'self' https://unpkg.com",
+  "img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+function securityHeaders(req, res, next) {
+  res.setHeader("Content-Security-Policy", CSP);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
+  next();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Limite de débit de l'API (fenêtre fixe, par adresse, en mémoire)   */
+/* ------------------------------------------------------------------ */
+// Chaque appel d'API peut déclencher une requête vers une source open data :
+// la limite protège ces sources autant que le serveur. Le front en émet
+// trois à quatre par demi-minute ; 120 par minute laisse une marge large.
+function createRateLimiter({ max, windowMs, now = Date.now }) {
+  const hits = new Map(); // adresse -> { count, resetAt }
+  const check = (key) => {
+    const t = now();
+    let h = hits.get(key);
+    if (!h || t >= h.resetAt) {
+      h = { count: 0, resetAt: t + windowMs };
+      hits.set(key, h);
+    }
+    h.count++;
+    return { allowed: h.count <= max, remaining: Math.max(0, max - h.count), resetAt: h.resetAt };
+  };
+  const sweep = () => {
+    const t = now();
+    for (const [key, h] of hits) if (t >= h.resetAt) hits.delete(key);
+  };
+  return { check, sweep, size: () => hits.size };
+}
+
+const apiLimiter = createRateLimiter({ max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+setInterval(apiLimiter.sweep, RATE_LIMIT_WINDOW_MS).unref();
+
+function rateLimit(req, res, next) {
+  if (req.path === "/health") return next(); // la sonde de santé n'est jamais limitée
+  const r = apiLimiter.check(req.ip || "inconnu");
+  res.setHeader("RateLimit-Limit", String(RATE_LIMIT_MAX));
+  res.setHeader("RateLimit-Remaining", String(r.remaining));
+  if (r.allowed) return next();
+  res.setHeader("Retry-After", String(Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000))));
+  res.status(429).json({ error: "Trop de requêtes", detail: "Limite de débit atteinte, réessayez dans un instant." });
+}
 
 /* ------------------------------------------------------------------ */
 /*  Tracés statiques (traces.json) : route_id GTFS -> polylignes        */
@@ -118,13 +207,22 @@ function resolveGtfsRouteId(code) {
 /* ------------------------------------------------------------------ */
 const store = new Map();
 
+// Écrit une entrée en la plaçant en fin de Map, puis évince les plus
+// anciennes au-delà de la borne : la mémoire reste bornée quel que soit le
+// nombre de clés distinctes demandées.
+function storeSet(key, entry, max = CACHE_MAX_ENTRIES) {
+  store.delete(key);
+  store.set(key, entry);
+  while (store.size > max) store.delete(store.keys().next().value);
+}
+
 async function cached(key, ttlMs, producer) {
   const hit = store.get(key);
   const now = Date.now();
   if (hit && now - hit.ts < ttlMs) return { value: hit.value, stale: false, cachedAt: hit.ts };
   try {
     const value = await producer();
-    store.set(key, { value, ts: now });
+    storeSet(key, { value, ts: now });
     return { value, stale: false, cachedAt: now };
   } catch (err) {
     if (hit) {
@@ -178,7 +276,7 @@ async function getCatalog() {
 
 async function getLine(lineId) {
   const line = (await getCatalog()).find((l) => l.id === lineId);
-  if (!line) throw new Error(`ligne inconnue : ${lineId}`);
+  if (!line) throw new HttpError(404, `ligne inconnue : ${lineId}`);
   return line;
 }
 
@@ -224,6 +322,15 @@ function transformSchedules(schedules) {
   return passages;
 }
 
+// Seuls les arrêts de la ligne sont acceptés : un identifiant arbitraire ne
+// peut ni remplir le cache ni être relayé vers Navitia.
+async function assertStopOfLine(lineId, stopId) {
+  const { stops } = await getStops(lineId);
+  if (!stops.some((s) => s.id === stopId)) {
+    throw new HttpError(404, `arrêt inconnu sur cette ligne : ${String(stopId).slice(0, 80)}`);
+  }
+}
+
 async function getStopSchedules(lineId, stopId, limit = 3) {
   const line = await getLine(lineId);
   const { value, stale, cachedAt, error } = await cached(`sched:${lineId}:${stopId}`, 30 * 1000, async () => {
@@ -256,7 +363,7 @@ async function mapLimit(items, limit, fn) {
 
 async function getAllSchedules(lineId, limit = 3) {
   const { stops, line } = await getStops(lineId);
-  const { value, cachedAt, stale } = await cached(`all:${lineId}`, 45 * 1000, async () =>
+  const { value, cachedAt, stale } = await cached(`all:${lineId}:${limit}`, 45 * 1000, async () =>
     mapLimit(stops, 5, async (s) => {
       try {
         const r = await getStopSchedules(lineId, s.id, limit);
@@ -415,14 +522,33 @@ function pythonFallback(lineCode, stopId) {
 /* ------------------------------------------------------------------ */
 /*  Routes HTTP                                                        */
 /* ------------------------------------------------------------------ */
-app.use(express.static(path.join(__dirname, "public")));
+// `limit` : entier de 1 à 10, 3 par défaut. Une valeur négative, nulle ou non
+// numérique ramène au défaut au lieu de contourner le plafond.
+function parseLimit(raw, { fallback = 3, max = 10 } = {}) {
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isInteger(n) || n < 1) return fallback;
+  return Math.min(n, max);
+}
+
+// Réponse d'erreur uniforme : 404 pour une ressource inconnue, 502 quand une
+// source externe est en cause.
+function sendError(res, err, message) {
+  const status = err instanceof HttpError ? err.status : 502;
+  res.status(status).json({ error: status === 404 ? "Ressource inconnue" : message, detail: err.message });
+}
+
+app.use(securityHeaders);
+// Cache navigateur court en production ; aucun en développement, pour que le
+// rechargement à chaud du front reste immédiat.
+app.use(express.static(path.join(__dirname, "public"), { maxAge: process.env.NODE_ENV === "production" ? "5m" : 0 }));
+app.use("/api", rateLimit);
 
 app.get("/api/lines", async (req, res) => {
   try {
     const lines = await getCatalog();
     res.json({ count: lines.length, lines, updatedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les lignes", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les lignes");
   }
 });
 
@@ -441,7 +567,7 @@ app.get("/api/lines/meta", async (req, res) => {
     }));
     res.json({ count: meta.length, lines: meta, updatedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les métadonnées des lignes", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les métadonnées des lignes");
   }
 });
 
@@ -450,7 +576,7 @@ app.get("/api/lines/:lineId/stops", async (req, res) => {
     const { line, stops, cachedAt } = await getStops(req.params.lineId);
     res.json({ line, count: stops.length, stops, updatedAt: new Date(cachedAt).toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les arrêts", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les arrêts");
   }
 });
 
@@ -461,27 +587,28 @@ app.get("/api/lines/:lineId/route", async (req, res) => {
     if (!trace) return res.json({ line, polylines: [], color: line.color });
     res.json({ line, color: line.color, polylines: trace.polylines });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer le tracé", detail: e.message });
+    sendError(res, e, "Impossible de récupérer le tracé");
   }
 });
 
 app.get("/api/lines/:lineId/schedules/:stopId", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 3, 10);
+    const limit = parseLimit(req.query.limit);
+    await assertStopOfLine(req.params.lineId, req.params.stopId);
     const data = await getStopSchedules(req.params.lineId, req.params.stopId, limit);
     res.json({ ...data, updatedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les horaires", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les horaires");
   }
 });
 
 app.get("/api/lines/:lineId/all-schedules", async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 3, 10);
+    const limit = parseLimit(req.query.limit);
     const data = await getAllSchedules(req.params.lineId, limit);
     res.json({ ...data, updatedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les horaires", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les horaires");
   }
 });
 
@@ -490,7 +617,7 @@ app.get("/api/lines/:lineId/vehicles", async (req, res) => {
     const data = await getVehicles(req.params.lineId);
     res.json({ ...data, updatedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les véhicules", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les véhicules");
   }
 });
 
@@ -509,13 +636,15 @@ app.get("/api/velodi/stations", async (req, res) => {
     const { stations, cachedAt, stale } = await getVelodiStations();
     res.json({ count: stations.length, stations, stale, updatedAt: new Date(cachedAt).toISOString() });
   } catch (e) {
-    res.status(502).json({ error: "Impossible de récupérer les stations DiviaVélodi", detail: e.message });
+    sendError(res, e, "Impossible de récupérer les stations DiviaVélodi");
   }
 });
 
 // Compatibilité ascendante : anciennes routes /api/line5/* → ligne L5.
 async function l5Id() {
-  return (await getCatalog()).find((l) => l.code === "L5").id;
+  const l5 = (await getCatalog()).find((l) => l.code === "L5");
+  if (!l5) throw new HttpError(404, "ligne L5 absente du catalogue");
+  return l5.id;
 }
 app.get("/api/line5/stops", (req, res, next) => l5Id().then((id) => res.redirect(307, `/api/lines/${encodeURIComponent(id)}/stops`)).catch(next));
 app.get("/api/line5/vehicles", (req, res, next) => l5Id().then((id) => res.redirect(307, `/api/lines/${encodeURIComponent(id)}/vehicles`)).catch(next));
@@ -523,6 +652,21 @@ app.get("/api/line5/all-schedules", (req, res, next) => l5Id().then((id) => res.
 app.get("/api/line5/schedules/:stopId", (req, res, next) => l5Id().then((id) => res.redirect(307, `/api/lines/${encodeURIComponent(id)}/schedules/${encodeURIComponent(req.params.stopId)}`)).catch(next));
 
 app.get("/api/health", (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+// Route d'API inconnue : même format JSON que les autres erreurs.
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "Ressource inconnue", detail: `${req.method} ${req.originalUrl.slice(0, 200)}` });
+});
+
+// Dernier filet : URL mal encodée (400), erreur portée par une redirection
+// historique, ou défaut imprévu. Jamais de pile d'appels dans la réponse.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  if (status >= 500) console.error(`[http] ${req.method} ${req.originalUrl.slice(0, 200)} : ${err.message}`);
+  const error = status === 404 ? "Ressource inconnue" : status < 500 ? "Requête invalide" : "Erreur interne";
+  res.status(status).json({ error, detail: status < 500 ? err.message : "erreur interne du serveur" });
+});
 
 // Les écouteurs sont posés en dehors de `app.listen` : un callback passé à
 // `listen` serait aussi appelé en cas d'échec, avant que l'adresse existe.

@@ -79,6 +79,9 @@ fournisseur de flux sans toucher au code. Toutes ont une valeur par défaut.
 | `VELODI_FEED_URL` | API de disponibilité des vélos en libre-service ; vide = couche désactivée |
 | `VELODI_ORG_ID` | identifiant d'organisation côté fournisseur vélos (`1` = Dijon) |
 | `GTFS_STATIC_URL` | jeu de données GTFS statique utilisé par `npm run build:traces` |
+| `RATE_LIMIT_MAX` | requêtes `/api` autorisées par minute et par adresse IP (défaut `120`, réponse `429` au-delà) |
+| `CACHE_MAX_ENTRIES` | taille maximale du cache en mémoire (défaut `2000`) |
+| `TRUST_PROXY` | derrière un reverse proxy : nombre de proxys de confiance, pour limiter le débit par visiteur |
 
 Le serveur lit `.env` au démarrage. Une variable déjà présente dans
 l'environnement l'emporte sur le fichier, ce qui permet une surcharge
@@ -145,6 +148,19 @@ PORT=8080 ./start.sh  # autre port (voir « Changer le port »)
 
 `:lineId` est l'identifiant Navitia (par exemple `line:CGD:L5`), encodé dans
 l'URL. Les anciennes routes `/api/line5/*` restent disponibles et redirigent.
+
+Les erreurs sont renvoyées en JSON, sous la forme `{ error, detail }` :
+
+| Statut | Cas |
+|---|---|
+| `400` | URL mal encodée |
+| `404` | ligne, arrêt ou route inconnus (`:stopId` doit être un arrêt de la ligne) |
+| `429` | limite de débit atteinte (en-tête `Retry-After`) |
+| `502` | source de données externe injoignable |
+
+`limit` est un entier de 1 à 10 ; toute autre valeur ramène à 3. Les réponses
+portent des en-têtes de sécurité (politique de contenu, `nosniff`,
+`X-Frame-Options`) et les en-têtes `RateLimit-Limit` / `RateLimit-Remaining`.
 
 ## Architecture
 
