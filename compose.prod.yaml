@@ -1,16 +1,17 @@
 # LineRelay — déploiement de PRODUCTION.
 #
 # Ce fichier ne construit rien : il tire une image déjà construite et testée,
-# publiée sur GitHub Container Registry.
+# publiée sur GitHub Container Registry. L'image est publique : aucun
+# `docker login` n'est nécessaire pour la tirer.
 #
-#   echo "$GHCR_TOKEN" | docker login ghcr.io -u tritrifix --password-stdin
 #   docker compose -f compose.prod.yaml pull
 #   docker compose -f compose.prod.yaml up -d
 #   docker compose -f compose.prod.yaml logs -f
 #
 # Épingler une version précise plutôt que `latest` pour un déploiement
-# reproductible (et un retour arrière immédiat) :
-#   LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:v1.0.0 \
+# reproductible (et un retour arrière immédiat). Les tags d'image n'ont pas le
+# préfixe « v » des tags Git :
+#   LINERELAY_IMAGE=ghcr.io/tritrifix/linerelay:1.1.0 \
 #     docker compose -f compose.prod.yaml up -d
 #
 # Port : PORT (dans .env sur le serveur) change le port d'écoute ET le port

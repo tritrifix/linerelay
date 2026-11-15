@@ -9,6 +9,13 @@ Toutes les lignes (bus et tram) sont disponibles, mais la carte n'en affiche
 nombre de requêtes, évite les superpositions de tracés et les artefacts
 d'affichage. Une couche optionnelle montre les stations de vélos en libre-service.
 
+Chaque véhicule en mouvement porte une **flèche de sens de marche**, et sa
+fiche indique sa destination et son cap en toutes lettres. La flèche est creuse
+quand le cap est estimé, et absente quand le véhicule est à l'arrêt ou que son
+sens est inconnu.
+
+Version courante : **1.1.0** — voir le [journal des modifications](CHANGELOG.md).
+
 > **Projet indépendant.** LineRelay n'est **affilié ni à Keolis ni à Divia**,
 > et n'est ni approuvé ni soutenu par ces entités. Il s'appuie uniquement sur
 > des données publiques. Aucun logo ni élément de marque n'est utilisé ou
@@ -103,7 +110,7 @@ port publié sur la machine hôte.
 
 ```bash
 # durablement, pour tous les modes de lancement
-sed -i 's/^PORT=.*/PORT=8080/' .env
+sed -i 's/^PORT=.*/PORT=8080/' .env      # sous macOS : sed -i '' 's/…/…/' .env
 
 # ponctuellement, le temps d'un lancement
 PORT=8080 npm start                                  # dev local
@@ -145,7 +152,7 @@ make test        # les deux
 
 Les sources externes sont remplacées par des doublures : la suite tourne hors
 ligne, en moins d'une seconde. Elle est lancée par GitHub Actions à chaque
-push et à chaque pull request.
+push sur `main` et à chaque pull request vers `main`, sous Node 18 et Node 20.
 
 ## API HTTP
 
@@ -159,7 +166,7 @@ push et à chaque pull request.
 | `GET /api/lines/:lineId/route` | tracé (une polyligne par sens) |
 | `GET /api/lines/:lineId/schedules/:stopId?limit=3` | prochains passages d'un arrêt |
 | `GET /api/lines/:lineId/all-schedules?limit=3` | passages de tous les arrêts |
-| `GET /api/lines/:lineId/vehicles` | positions temps réel des véhicules |
+| `GET /api/lines/:lineId/vehicles` | positions temps réel des véhicules, avec leur cap (voir [Véhicules](#véhicules)) |
 | `GET /api/velodi/stations` | stations de vélos en libre-service (position, vélos et places disponibles) |
 | `GET /api/health` | sonde de santé |
 
@@ -179,6 +186,26 @@ Les erreurs sont renvoyées en JSON, sous la forme `{ error, detail }` :
 portent des en-têtes de sécurité (politique de contenu, `nosniff`,
 `X-Frame-Options`) et les en-têtes `RateLimit-Limit` / `RateLimit-Remaining`.
 
+### Véhicules
+
+`GET /api/lines/:lineId/vehicles` renvoie `{ vehicles, cachedAt, stale, updatedAt }`.
+Chaque véhicule porte les champs d'origine, inchangés, et depuis la version
+1.1.0 des champs supplémentaires, tous optionnels pour un client existant :
+
+| Champ | Depuis | Valeur |
+|---|---|---|
+| `id`, `lat`, `lon`, `tripId` | 1.0.0 | identifiant, position, course |
+| `bearing` | 1.0.0 | cap brut du flux ; `null` s'il est absent **ou égal à 0** (comportement historique conservé) |
+| `speed` | 1.0.0 | vitesse telle que publiée par le flux, en **km/h**, ou `null` |
+| `heading` | 1.1.0 | cap en degrés dans `[0, 360)` (0 = nord, 90 = est), ou `null` |
+| `headingSource` | 1.1.0 | `bearing` (cap du flux), `estimé` (déduit de deux positions successives) ou `inconnu` |
+| `stopped` | 1.1.0 | `true` si le véhicule est à l'arrêt : vitesse nulle et moins de 15 m parcourus |
+| `speedReliable` | 1.1.0 | `false` si la vitesse dépasse 100 km/h (valeur aberrante du flux), `null` si elle est absente |
+| `directionId` | 1.1.0 | sens de la course annoncé par le flux, ou `null` |
+| `destination` | 1.1.0 | nom du terminus de ce sens, ou `null` s'il ne peut pas être déterminé |
+
+Pour afficher un sens de marche, utilisez `heading` plutôt que `bearing`.
+
 ## Architecture
 
 ```
@@ -186,11 +213,13 @@ linerelay/
 ├── server.js              backend Express : catalogue, API par ligne, cache TTL, statique
 ├── fallback_gtfs.py       repli horaires GTFS-RT (Python, best-effort)
 ├── tools/build_traces.py  génère public/traces.json depuis le GTFS statique
-├── test/server.test.js    tests unitaires et HTTP, sources simulées
+├── test/
+│   ├── server.test.js     tests unitaires et HTTP, sources simulées
+│   └── heading.test.js    cap des véhicules : calcul, index, réponse HTTP
 ├── public/
-│   ├── index.html         page + menu déroulant + Leaflet (CDN)
+│   ├── index.html         page + menu déroulant + légende + Leaflet (CDN)
 │   ├── style.css
-│   ├── app.js             carte, sélecteur, arrêts, popups, véhicules, MàJ 30 s
+│   ├── app.js             carte, sélecteur, arrêts, popups, véhicules et leur sens de marche, MàJ 30 s
 │   └── traces.json        généré, non versionné
 ├── Dockerfile             image multi-étages (npm, tracés GTFS, runtime)
 ├── compose.yaml           développement local, rechargement à chaud
@@ -200,6 +229,7 @@ linerelay/
 ├── docs/DOCKER.md          workflow dev → image → production
 ├── .github/workflows/     tests ; build, vérification et publication de l'image sur GHCR
 ├── install.sh / start.sh  installation hors conteneur
+├── CHANGELOG.md           journal des modifications, version par version
 └── .env.example
 ```
 
@@ -209,6 +239,20 @@ simultanés à une même source sont mutualisés, chaque source a un délai maxi
 de 5 secondes, et un échec n'est pas retenté pendant 5 secondes. Le flux des
 véhicules est décodé une fois puis indexé par ligne (TTL 10 s) : changer de
 ligne ne déclenche aucune requête réseau supplémentaire.
+
+**Cap des véhicules** — le cap vient du champ `bearing` du flux. À défaut, il
+est estimé par l'azimut entre deux positions successives distantes d'au moins
+15 m ; le serveur garde pour cela une position de référence par véhicule, en
+mémoire, pendant 5 minutes au plus. Le flux annonce parfois un cap opposé au
+sens de marche réel : un `bearing` démenti par un déplacement net (écart d'au
+moins 120° sur au moins 40 m) cède au cap estimé. Les caps estimés ou inconnus
+et les vitesses écartées sont signalés dans les logs (ligne `[cap]`). Cette
+mémoire est propre au processus : elle est perdue au redémarrage, et vide tant
+qu'aucun visiteur n'a interrogé l'API.
+
+**Destination** — le terminus d'un sens est l'arrêt le plus proche de la fin
+du tracé de ce sens. Il est absent si l'image a été construite sans tracés
+(`SKIP_TRACES=1`) ou si le flux ne donne pas le sens de la course.
 
 **Correspondance ligne Navitia ↔ route GTFS** — le `route_id` GTFS vaut
 `4-<short_name>`. Le code Navitia s'y relie en retirant son préfixe

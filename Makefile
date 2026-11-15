@@ -3,10 +3,10 @@
 #   make dev      développement local, rechargement à chaud
 #   make build    construit l'image de production
 #   make smoke    construit puis vérifie que l'image répond
-#   make push     publie l'image sur GHCR (TAG=v1.0.0)
+#   make push     publie l'image sur GHCR (TAG=1.1.0, sans préfixe « v »)
 #   make deploy   à exécuter SUR le serveur : pull + up -d
 #
-# Surcharges possibles :  PORT=8080 make dev   /   TAG=v1.0.0 make push
+# Surcharges possibles :  PORT=8080 make dev   /   TAG=1.1.0 make push
 
 SHELL := /bin/bash
 IMAGE ?= ghcr.io/tritrifix/linerelay
@@ -68,8 +68,8 @@ smoke: build ## Construit puis vérifie /api/health sous les contraintes de la p
 	echo "ÉCHEC : pas de réponse sur /api/health" >&2; \
 	docker logs linerelay-smoke >&2; docker rm -f linerelay-smoke >/dev/null; exit 1
 
-push: ## Publie l'image sur GHCR (TAG=v1.0.0 make push)
-	@test "$(TAG)" != "dev" || { echo "Donnez un TAG explicite : TAG=v1.0.0 make push" >&2; exit 1; }
+push: ## Publie l'image sur GHCR (TAG=1.1.0 make push)
+	@test "$(TAG)" != "dev" || { echo "Donnez un TAG explicite : TAG=1.1.0 make push" >&2; exit 1; }
 	docker build -t $(IMAGE):$(TAG) .
 	docker push $(IMAGE):$(TAG)
 
