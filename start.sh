@@ -32,12 +32,21 @@ if [ -z "${PORT:-}" ] && [ -f .env ]; then
   PORT="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}PORT[[:space:]]*=[[:space:]]*["'"'"']\{0,1\}\([0-9]\{1,5\}\).*/\2/p' .env | tail -n1)"
 fi
 PORT="${PORT:-3000}"
-APP_NAME="divia-ligne5"
+APP_NAME="linerelay"
+# Nom du processus PM2 avant le renommage du projet : encore arrêté ici, pour
+# qu'une installation existante ne garde pas l'ancien processus (et le port)
+# après une mise à jour.
+LEGACY_APP_NAME="divia-ligne5"
 PID_FILE=".server.pid"
 LOG_FILE="server.log"
 export PORT
 
 use_pm2() { command -v pm2 >/dev/null 2>&1; }
+
+pm2_delete_all() {
+  pm2 delete "$APP_NAME" 2>/dev/null || true
+  pm2 delete "$LEGACY_APP_NAME" 2>/dev/null || true
+}
 
 stop_plain() {
   if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -48,7 +57,7 @@ stop_plain() {
 
 case "${1:-start}" in
   stop)
-    if use_pm2; then pm2 delete "$APP_NAME" 2>/dev/null || true; else stop_plain; fi
+    if use_pm2; then pm2_delete_all; else stop_plain; fi
     ;;
   status)
     if use_pm2; then pm2 describe "$APP_NAME" || echo "non géré par pm2"; \
@@ -59,7 +68,7 @@ case "${1:-start}" in
   start|"")
     if use_pm2; then
       echo "Démarrage via PM2 (port $PORT)…"
-      pm2 delete "$APP_NAME" 2>/dev/null || true
+      pm2_delete_all
       pm2 start server.js --name "$APP_NAME"
       pm2 save || true
     else
