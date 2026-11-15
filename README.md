@@ -36,7 +36,8 @@ make dev          # ou : docker compose up --build
 # puis ouvrir http://localhost:3000   (PORT=8080 make dev pour un autre port)
 ```
 
-Le code est monté depuis l'hôte et le serveur redémarre à chaque sauvegarde.
+Le code est monté depuis l'hôte et le serveur redémarre à chaque sauvegarde
+(après un changement de branche Git, recréer le conteneur : voir la doc Docker).
 Le workflow complet — développement local, publication de l'image sur GHCR,
 déploiement en production — est décrit dans **[docs/DOCKER.md](docs/DOCKER.md)**.
 
@@ -82,6 +83,9 @@ fournisseur de flux sans toucher au code. Toutes ont une valeur par défaut.
 | `RATE_LIMIT_MAX` | requêtes `/api` autorisées par minute et par adresse IP (défaut `120`, réponse `429` au-delà) |
 | `CACHE_MAX_ENTRIES` | taille maximale du cache en mémoire (défaut `2000`) |
 | `TRUST_PROXY` | derrière un reverse proxy : nombre de proxys de confiance, pour limiter le débit par visiteur |
+
+Les variables propres à Docker (`HOST_PORT`, `TZ`, `LINERELAY_IMAGE`,
+`SKIP_TRACES`) sont décrites dans [docs/DOCKER.md](docs/DOCKER.md).
 
 Le serveur lit `.env` au démarrage. Une variable déjà présente dans
 l'environnement l'emporte sur le fichier, ce qui permet une surcharge
@@ -192,7 +196,7 @@ linerelay/
 ├── compose.yaml           développement local, rechargement à chaud
 ├── compose.prod.yaml      déploiement : tire l'image publiée sur GHCR
 ├── Makefile               raccourcis : dev, build, smoke, push, deploy
-├── docker/                requirements Python du repli
+├── docker/                requirements Python du repli, élagage de node_modules
 ├── docs/DOCKER.md          workflow dev → image → production
 ├── .github/workflows/     tests ; build, vérification et publication de l'image sur GHCR
 ├── install.sh / start.sh  installation hors conteneur

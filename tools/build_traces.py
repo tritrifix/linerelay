@@ -35,7 +35,7 @@ def read_csv(zf, name):
 def main():
     log("Téléchargement du GTFS statique Divia…")
     socket.setdefaulttimeout(90)
-    req = urllib.request.Request(GTFS_URL, headers={"User-Agent": "divia-map/2.0"})
+    req = urllib.request.Request(GTFS_URL, headers={"User-Agent": "linerelay/1.0 (+https://github.com/tritrifix/linerelay)"})
     zf = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(req).read()))
 
     # Métadonnées des routes
