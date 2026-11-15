@@ -199,8 +199,11 @@ function resolveGtfsRouteId(code) {
   if (SHORT_TO_ROUTE[code]) return SHORT_TO_ROUTE[code];
   const stripped = code.replace(/^[A-Za-z]+/, ""); // B10->10, R30->30, BC61->61
   if (stripped && SHORT_TO_ROUTE[stripped]) return SHORT_TO_ROUTE[stripped];
-  // Repli : construit l'id même sans tracé (utile pour les véhicules)
-  return "4-" + (SHORT_TO_ROUTE[code] ? code : stripped || code);
+  // Repli sans tracé (build SKIP_TRACES=1) : l'identifiant est construit, pour
+  // que les véhicules restent retrouvés. Tramways et lianes gardent leur code
+  // (T1 -> 4-T1, L5 -> 4-L5) ; les autres lignes numérotées perdent leur
+  // préfixe (B10 -> 4-10) ; un code sans chiffre est repris tel quel.
+  return "4-" + (/^[TL]\d+$/.test(code) ? code : stripped || code);
 }
 
 /* ------------------------------------------------------------------ */
@@ -741,7 +744,7 @@ app.use("/api", (req, res) => {
 
 // Dernier filet : URL mal encodée (400), erreur portée par une redirection
 // historique, ou défaut imprévu. Jamais de pile d'appels dans la réponse.
-// eslint-disable-next-line no-unused-vars
+// (les quatre paramètres sont requis : c'est ainsi qu'Express reconnaît un gestionnaire d'erreur)
 app.use((err, req, res, next) => {
   const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
   if (status >= 500) console.error(`[http] ${req.method} ${req.originalUrl.slice(0, 200)} : ${err.message}`);
@@ -751,23 +754,43 @@ app.use((err, req, res, next) => {
 
 // Les écouteurs sont posés en dehors de `app.listen` : un callback passé à
 // `listen` serait aussi appelé en cas d'échec, avant que l'adresse existe.
-const server = app.listen(PORT);
-server.on("listening", () => {
-  // PORT=0 : le port réellement attribué n'est connu qu'ici.
-  const { port } = server.address();
-  console.log(`LineRelay → http://localhost:${port}`);
-});
-server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    console.error(
-      `Port ${PORT} déjà occupé. Changez PORT (dans .env, ou PORT=8080 npm start).`,
-    );
-  } else if (err.code === "EACCES") {
-    console.error(
-      `Port ${PORT} interdit sans privilèges. Choisissez un PORT >= 1024.`,
-    );
-  } else {
-    console.error(`Impossible d'écouter sur le port ${PORT} :`, err.message);
-  }
-  process.exit(1);
-});
+function start(port = PORT) {
+  const server = app.listen(port);
+  server.on("listening", () => {
+    // PORT=0 : le port réellement attribué n'est connu qu'ici.
+    console.log(`LineRelay → http://localhost:${server.address().port}`);
+  });
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`Port ${port} déjà occupé. Changez PORT (dans .env, ou PORT=8080 npm start).`);
+    } else if (err.code === "EACCES") {
+      console.error(`Port ${port} interdit sans privilèges. Choisissez un PORT >= 1024.`);
+    } else {
+      console.error(`Impossible d'écouter sur le port ${port} :`, err.message);
+    }
+    process.exit(1);
+  });
+  return server;
+}
+
+// Lancé directement (`node server.js`) : on écoute. Chargé par les tests
+// (`require`) : rien ne démarre, ils pilotent `app` et les fonctions exportées.
+if (require.main === module) start();
+
+module.exports = {
+  app,
+  start,
+  HttpError,
+  cached,
+  storeSet,
+  store,
+  failures,
+  createRateLimiter,
+  parseLimit,
+  fmtServiceTime,
+  resolveGtfsRouteId,
+  gtfsStopCode,
+  transformSchedules,
+  schedulesWithFallback,
+  buildDelayIndex,
+};

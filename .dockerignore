@@ -33,6 +33,9 @@ public/traces.json
 *.crt
 secrets
 
+# Tests : jamais dans l'image
+test
+
 # Docker / docs : inutiles dans l'image
 compose*.yaml
 compose*.yml

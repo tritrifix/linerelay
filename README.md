@@ -131,6 +131,18 @@ npm start             # premier plan
 PORT=8080 ./start.sh  # autre port (voir « Changer le port »)
 ```
 
+## Tests
+
+```bash
+npm test         # tests unitaires et HTTP (node:test, aucune dépendance, aucun appel réseau)
+npm run check    # vérification de syntaxe des fichiers JavaScript
+make test        # les deux
+```
+
+Les sources externes sont remplacées par des doublures : la suite tourne hors
+ligne, en moins d'une seconde. Elle est lancée par GitHub Actions à chaque
+push et à chaque pull request.
+
 ## API HTTP
 
 | Endpoint | Description |
@@ -170,6 +182,7 @@ linerelay/
 ├── server.js              backend Express : catalogue, API par ligne, cache TTL, statique
 ├── fallback_gtfs.py       repli horaires GTFS-RT (Python, best-effort)
 ├── tools/build_traces.py  génère public/traces.json depuis le GTFS statique
+├── test/server.test.js    tests unitaires et HTTP, sources simulées
 ├── public/
 │   ├── index.html         page + menu déroulant + Leaflet (CDN)
 │   ├── style.css
@@ -181,7 +194,7 @@ linerelay/
 ├── Makefile               raccourcis : dev, build, smoke, push, deploy
 ├── docker/                requirements Python du repli
 ├── docs/DOCKER.md          workflow dev → image → production
-├── .github/workflows/     build et publication de l'image sur GHCR
+├── .github/workflows/     tests ; build, vérification et publication de l'image sur GHCR
 ├── install.sh / start.sh  installation hors conteneur
 └── .env.example
 ```
