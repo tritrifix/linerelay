@@ -454,6 +454,11 @@
   async function init() {
     $("refresh-btn").addEventListener("click", manualRefresh);
     $("delays-toggle").addEventListener("click", toggleDelays);
+    // Légende repliable (bouton visible seulement sur petits écrans, via CSS).
+    $("legend-toggle").addEventListener("click", () => {
+      const open = $("legend").classList.toggle("open");
+      $("legend-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+    });
     syncDelaysButton();
     setStatus("stale", "Chargement…");
     let savedId;
