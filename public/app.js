@@ -1,4 +1,4 @@
-/* app.js — carte Leaflet du réseau Divia : une ligne affichée à la fois,
+/* app.js — carte Leaflet de LineRelay : une ligne affichée à la fois,
    choisie via le menu déroulant. Limite les requêtes (seule la ligne
    sélectionnée est chargée + rafraîchie) et évite les superpositions. */
 (() => {

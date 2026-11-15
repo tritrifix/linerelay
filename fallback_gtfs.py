@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fallback_gtfs.py — Repli GTFS-RT pour les horaires de la ligne 5.
+fallback_gtfs.py — Repli GTFS-RT pour les prochains passages d'un arrêt.
 
 Appelé par server.js si la source principale (divia-api / Navitia) est en
 erreur ou ne renvoie aucun passage, pour les lignes dont l'identifiant TOTEM

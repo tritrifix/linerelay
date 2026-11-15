@@ -105,6 +105,13 @@ Le code est monté depuis l'hôte **fichier par fichier** (`server.js`,
 redémarre le serveur. Les fichiers sont montés en lecture seule — le conteneur
 ne peut pas modifier tes sources.
 
+> **Après un changement de branche, recrée le conteneur.** Un montage fichier
+> par fichier suit le fichier d'origine, pas son nom : quand Git (`git switch`,
+> `git merge`, `git pull`) ou un éditeur réglé pour écrire par remplacement
+> (*safe write* de WebStorm) remplace le fichier, le conteneur garde l'ancien
+> et ne voit plus les modifications. `docker compose up -d --force-recreate`
+> (ou `make up`) rétablit les montages.
+
 > Le dossier `public/` n'est volontairement **pas** monté en entier : cela
 > masquerait le `public/traces.json` généré dans l'image, et la carte perdrait
 > ses tracés. Un nouveau fichier statique doit donc être ajouté à la liste des
@@ -150,8 +157,10 @@ Pour sortir une version :
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-> Le paquet GHCR hérite de la visibilité du dépôt : il sera **privé**, comme
-> `tritrifix/linerelay`. Le serveur doit donc s'authentifier pour le tirer.
+> Le dépôt `tritrifix/linerelay` est **public**. Le paquet GHCR, lui, garde
+> la visibilité qu'il avait à sa création : vérifie-la dans l'onglet
+> *Packages* du dépôt. S'il est privé, le serveur doit s'authentifier pour le
+> tirer (étapes ci-dessous) ; s'il est public, `docker login` est inutile.
 
 ### À la main depuis ta machine
 
@@ -260,6 +269,8 @@ transmises par `env_file`.
 | `VEHICLE_FEED_URL`, `TRIPUPDATE_FEED_URL` | application | flux GTFS-RT |
 | `VELODI_FEED_URL`, `VELODI_ORG_ID` | application | couche vélos ; URL vide = désactivée |
 | `GTFS_STATIC_URL` | build et `build:traces` | jeu de données GTFS statique |
+| `RATE_LIMIT_MAX`, `CACHE_MAX_ENTRIES` | application | garde-fous de l'API (défauts `120` par minute et `2000` entrées) |
+| `TRUST_PROXY` | application | derrière un reverse proxy : nombre de proxys de confiance, pour limiter le débit par visiteur |
 
 ## Ce que Docker ne reprend pas
 

@@ -1,5 +1,6 @@
 /**
- * server.js — Backend de la carte temps réel du réseau Divia (Dijon).
+ * server.js — Backend de LineRelay, carte temps réel des transports en
+ * commun de Dijon Métropole (projet indépendant, non affilié à l'exploitant).
  *
  * Multi-lignes : expose le catalogue de TOUTES les lignes (bus + tram) ; le
  * frontend n'en affiche qu'une à la fois (sélecteur), ce qui limite les
