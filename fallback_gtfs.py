@@ -2,8 +2,9 @@
 """
 fallback_gtfs.py — Repli GTFS-RT pour les horaires de la ligne 5.
 
-Appelé par server.js UNIQUEMENT si la source principale (divia-api / Navitia)
-échoue ou ne renvoie aucun passage. S'appuie sur le module
+Appelé par server.js si la source principale (divia-api / Navitia) est en
+erreur ou ne renvoie aucun passage, pour les lignes dont l'identifiant TOTEM
+est connu (GTFS_LINE_TOTEM dans server.js : la ligne L5 aujourd'hui). S'appuie sur le module
 `divia_api.gtfs_realtime` du dépôt tritrifix/scripts-divia, cloné par
 install.sh dans ./divia-scripts/.
 

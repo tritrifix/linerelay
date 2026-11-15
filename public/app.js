@@ -122,7 +122,7 @@
   // Récupère les retards en cours (best-effort, échec silencieux).
   async function loadDelays() {
     try {
-      const data = await api("api/lines/delays");
+      const data = await api(lineUrl("/delays")); // retards de la ligne affichée uniquement
       delaysByCode = data.stops || {};
     } catch (e) {
       console.warn("loadDelays", e.message); // on conserve l'état précédent, aucun badge ajouté
@@ -382,7 +382,7 @@
         })
           .bindPopup(
             '<div class="popup-title">Véhicule ' + escapeHtml(v.id || "") + "</div>" +
-              (v.speed != null ? Math.round(v.speed * 3.6) + " km/h" : "en circulation")
+              (v.speed != null ? Math.round(v.speed) + " km/h" : "en circulation") // le flux publie des km/h
           )
           .addTo(busLayer);
       }
