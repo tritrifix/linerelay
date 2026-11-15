@@ -21,7 +21,7 @@
   "keywords": ["divia", "dijon", "gtfs-rt", "navitia", "leaflet", "bus", "temps-reel"],
   "license": "ISC",
   "dependencies": {
-    "divia-api": "^3.0.3",
+    "divia-api": "^3.0.4",
     "express": "^5.3.0",
     "gtfs-realtime-bindings": "^1.1.1"
   }
